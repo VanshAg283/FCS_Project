@@ -6,7 +6,7 @@ class CorsMiddleware:
         response = self.get_response(request)
         if 'HTTP_ORIGIN' in request.META:
             # Validate the origin before allowing it
-            allowed_origins = ['http://localhost:5173']
+            allowed_origins = ['http://localhost:5173', 'http://192.168.2.251', 'https://192.168.2.251']
             origin = request.META['HTTP_ORIGIN']
             if origin in allowed_origins:
                 response["Access-Control-Allow-Origin"] = origin
