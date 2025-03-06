@@ -63,6 +63,13 @@ export default function Profile() {
     fetchProfile();
   }, [navigate]);
 
+  // 🔹 Logout function
+  const handleLogout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    navigate("/login");
+  };
+
   if (error) {
     return <p className="text-red-500 text-center">{error}</p>;
   }
@@ -74,6 +81,12 @@ export default function Profile() {
           <h2 className="text-2xl font-bold text-blue-600">Profile</h2>
           <p><strong>Username:</strong> {user.username}</p>
           <p><strong>Email:</strong> {user.email}</p>
+          <button
+            onClick={handleLogout}
+            className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+          >
+            Logout
+          </button>
         </div>
       ) : (
         <p className="text-gray-500">Loading profile...</p>
