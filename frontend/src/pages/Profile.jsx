@@ -1,18 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext } from "react";
 import { useNavigate } from "react-router-dom";
+import AuthContext from "../context/AuthContext.jsx";
 
 export default function Profile() {
   const [user, setUser] = useState(null);
+  const [newUsername, setNewUsername] = useState("");
+  const [newProfilePic, setNewProfilePic] = useState(null);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const navigate = useNavigate();
+  const { logout, fetchProfile } = useContext(AuthContext);
+
+  const defaultProfilePic = "/person.png"; // Default image
 
   useEffect(() => {
-    const fetchProfile = async () => {
+    const fetchUserProfile = async () => {
       let accessToken = localStorage.getItem("access_token");
       let refreshToken = localStorage.getItem("refresh_token");
 
       if (!accessToken) {
-        navigate("/login"); // Redirect if not logged in
+        logout();
+        navigate("/login");
         return;
       }
 
@@ -24,7 +32,6 @@ export default function Profile() {
           },
         });
 
-        // If access token expired, try refreshing it
         if (response.status === 401 && refreshToken) {
           const refreshResponse = await fetch("/api/auth/token/refresh/", {
             method: "POST",
@@ -32,14 +39,11 @@ export default function Profile() {
             body: JSON.stringify({ refresh: refreshToken }),
           });
 
-          if (!refreshResponse.ok) {
-            throw new Error("Session expired. Please log in again.");
-          }
+          if (!refreshResponse.ok) throw new Error("Session expired. Please log in again.");
 
           const newTokens = await refreshResponse.json();
           localStorage.setItem("access_token", newTokens.access);
 
-          // Retry fetching profile with new access token
           response = await fetch("/api/auth/profile/", {
             headers: {
               "Authorization": `Bearer ${newTokens.access}`,
@@ -48,26 +52,62 @@ export default function Profile() {
           });
         }
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch profile.");
-        }
+        if (!response.ok) throw new Error("Failed to fetch profile.");
 
         const data = await response.json();
         setUser(data);
+        setNewUsername(data.username);
       } catch (err) {
         setError(err.message);
-        setTimeout(() => navigate("/login"), 2000); // Redirect after 2 seconds
+        setTimeout(() => navigate("/login"), 2000);
       }
     };
 
-    fetchProfile();
-  }, [navigate]);
+    fetchUserProfile();
+  }, [navigate, logout]);
 
-  // 🔹 Logout function
   const handleLogout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
+    logout();
     navigate("/login");
+  };
+
+  const handleProfileUpdate = async () => {
+    let formData = new FormData();
+    if (newUsername) formData.append("username", newUsername);
+    if (newProfilePic) formData.append("profile_picture", newProfilePic);
+
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      let response = await fetch("/api/auth/profile/update/", {
+        method: "PUT",
+        headers: { "Authorization": `Bearer ${accessToken}` },
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Failed to update profile.");
+
+      setMessage("Profile updated successfully!");
+      fetchProfile();
+    } catch (err) {
+      setMessage("Error updating profile.");
+    }
+  };
+
+  const handleRemoveProfilePic = async () => {
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      let response = await fetch("/api/auth/profile/remove_picture/", {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+
+      if (!response.ok) throw new Error("Failed to remove profile picture.");
+
+      setMessage("Profile picture removed!");
+      fetchProfile();
+    } catch (err) {
+      setMessage("Error removing profile picture.");
+    }
   };
 
   if (error) {
@@ -75,22 +115,72 @@ export default function Profile() {
   }
 
   return (
-    <div className="flex justify-center items-center h-screen bg-gray-100">
-      {user ? (
-        <div className="bg-white shadow-lg rounded-lg p-6 w-96 text-center">
-          <h2 className="text-2xl font-bold text-blue-600">Profile</h2>
-          <p><strong>Username:</strong> {user.username}</p>
-          <p><strong>Email:</strong> {user.email}</p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-r from-blue-500 to-purple-500 p-6">
+      <div className="bg-white shadow-lg rounded-lg p-8 w-full max-w-md text-center">
+        <h2 className="text-3xl font-bold text-gray-800 mb-4">Profile</h2>
+
+        {/* Profile Picture with Upload & Remove Option */}
+        <div className="relative w-32 h-32 mx-auto mb-4">
+          <img
+            src={user?.profile_picture || defaultProfilePic}
+            alt="Profile"
+            className="w-full h-full object-cover rounded-full border-4 border-blue-400 shadow-lg"
+          />
+          <label className="absolute bottom-0 right-0 bg-blue-500 text-white p-2 rounded-full cursor-pointer hover:bg-blue-700 transition">
+            📷
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => setNewProfilePic(e.target.files[0])}
+            />
+          </label>
+        </div>
+
+        {user?.profile_picture && (
           <button
-            onClick={handleLogout}
-            className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+            onClick={handleRemoveProfilePic}
+            className="bg-red-500 text-white px-4 py-1 rounded hover:bg-red-700 transition"
           >
-            Logout
+            Remove Picture
+          </button>
+        )}
+
+        <p className="text-gray-700"><strong>Username:</strong> {user?.username}</p>
+        <p className="text-gray-500"><strong>Email:</strong> {user?.email}</p>
+
+        {/* Profile Update Form */}
+        <div className="mt-6">
+          <input
+            type="text"
+            placeholder="New Username"
+            value={newUsername}
+            onChange={(e) => setNewUsername(e.target.value)}
+            className="border p-2 w-full rounded-md shadow-sm"
+          />
+          <button
+            onClick={handleProfileUpdate}
+            className="mt-4 px-4 py-2 w-full bg-blue-500 text-white rounded-lg hover:bg-blue-700 transition"
+          >
+            Update Profile
           </button>
         </div>
-      ) : (
-        <p className="text-gray-500">Loading profile...</p>
-      )}
+
+        {/* Message Display */}
+        {message && <p className="text-green-500 mt-2">{message}</p>}
+        {error && <p className="text-red-500 mt-2">{error}</p>}
+
+        {/* Logout Button */}
+        <button
+          onClick={() => {
+            logout();
+            navigate("/login");
+          }}
+          className="mt-6 px-4 py-2 w-full bg-red-500 text-white rounded-lg hover:bg-red-700 transition"
+        >
+          Logout
+        </button>
+      </div>
     </div>
   );
 }
