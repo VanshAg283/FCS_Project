@@ -3,7 +3,7 @@ import { useContext } from "react";
 import AuthContext from "../context/AuthContext";
 
 export default function Header() {
-  const { isLoggedIn, user, logout } = useContext(AuthContext);
+  const { isLoggedIn, user, logout, isAdmin } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -18,6 +18,13 @@ export default function Header() {
       <div className="flex items-center space-x-4">
         {isLoggedIn ? (
           <>
+            <Link to="/chat" className="mr-4">Chat</Link>
+            {/* Admin Panel - Only for Admins */}
+            {isAdmin && (  // ✅ Only show Admin Panel for admins
+              <Link to="/admin" className="hover:underline text-yellow-300 font-semibold">
+                Admin Panel
+              </Link>
+            )}
             <Link to="/profile" className="flex items-center hover:underline">
               <img
                 src={user?.profile_picture || "/person.png"} // Default image

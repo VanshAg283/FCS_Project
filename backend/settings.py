@@ -46,6 +46,8 @@ INSTALLED_APPS = [
     'api',
     'authentication',
     'corsheaders',
+    'chat',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -164,3 +166,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ✅ Configure where uploaded profile pictures are stored
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY") 

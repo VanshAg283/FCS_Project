@@ -16,7 +16,7 @@ export default function Login() {
       localStorage.setItem("access_token", data.access);
       localStorage.setItem("refresh_token", data.refresh);
       setMessage("Login successful! Redirecting...");
-      setTimeout(() => window.location.href = "/profile", 1500);
+      setTimeout(() => window.location.href = "/chat", 1500);
     } else {
       setMessage(data.error || "Login failed.");
     }

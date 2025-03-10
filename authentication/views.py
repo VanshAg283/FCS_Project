@@ -5,9 +5,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.parsers import MultiPartParser, FormParser
-from .serializers import ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer
+from .serializers import ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer, UserSerializer
 from .models import Profile
 
 @api_view(["POST"])
@@ -39,7 +39,8 @@ def login_user(request):
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
-                "profile_picture": user.profile.profile_picture.url if user.profile.profile_picture else None
+                "profile_picture": user.profile.profile_picture.url if user.profile.profile_picture else None,
+                "is_admin": user.is_superuser
             }
         })
     return Response({"error": "Invalid Credentials"}, status=status.HTTP_401_UNAUTHORIZED)
@@ -47,12 +48,13 @@ def login_user(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def user_profile(request):
-    profile = Profile.objects.get(user=request.user)
+    profile, created = Profile.objects.get_or_create(user=request.user)
     return Response({
         "id": request.user.id,
         "username": request.user.username,
         "email": request.user.email,
-        "profile_picture": request.build_absolute_uri(profile.profile_picture.url) if profile.profile_picture else None
+        "profile_picture": request.build_absolute_uri(profile.profile_picture.url) if profile.profile_picture else None,
+        "is_admin": request.user.is_superuser
     })
 
 @api_view(["PUT"])
@@ -91,3 +93,49 @@ def remove_profile_picture(request):
         profile.save()
 
     return Response({"message": "Profile picture removed successfully."}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])  # Only logged-in users can access
+def get_users(request):
+    users = User.objects.exclude(id=request.user.id)  # Exclude self from list
+    serializer = UserSerializer(users, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])  # ✅ Only Admins Can Access
+def admin_dashboard(request):
+    users = User.objects.all()
+    user_data = [
+        {
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "is_verified": hasattr(u, "profile") and u.profile.is_verified,  # ✅ Handle Missing Profile
+        }
+        for u in users
+    ]
+    return Response(user_data)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])  # ✅ Admin only
+def verify_user(request, user_id):
+    try:
+        profile = Profile.objects.get(user_id=user_id)
+        profile.is_verified = True
+        profile.save()
+        return Response({"message": "User verified successfully."})
+    except Profile.DoesNotExist:
+        return Response({"error": "User not found."}, status=404)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])  # ✅ Admin only
+def reject_user(request, user_id):
+    try:
+        profile = Profile.objects.get(user_id=user_id)
+        profile.is_verified = False
+        profile.save()
+        return Response({"message": "User rejected successfully."})
+    except Profile.DoesNotExist:
+        return Response({"error": "User not found."}, status=404)
