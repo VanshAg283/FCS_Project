@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/', include('api.urls')),
     path('api/auth/', include('authentication.urls')),
     path("api/chat/", include("chat.urls")),
+    path("api/groupchat/", include("groupchat.urls")),
 ]
 
 # ✅ Serve media files in development mode

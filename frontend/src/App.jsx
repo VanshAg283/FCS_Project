@@ -10,6 +10,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import ChatList from "./pages/ChatList";
 import Chat from "./pages/Chat";
 import AdminDashboard from "./pages/AdminDashboard";
+import GroupList from "./pages/GroupList";
+import GroupChat from "./pages/GroupChat";
 
 
 function Home() {
@@ -51,6 +53,17 @@ export default function App() {
         <Route path="/chat/:receiverId" element={
           <ProtectedRoute>
             <Chat />
+          </ProtectedRoute>
+        } />
+        {/* Group Chat Routes */}
+        <Route path="/groups" element={
+          <ProtectedRoute>
+            <GroupList />
+          </ProtectedRoute>
+        } />
+        <Route path="/groups/:groupId" element={
+          <ProtectedRoute>
+            <GroupChat />
           </ProtectedRoute>
         } />
        {/* Admin Dashboard (Only for Admins) */}

@@ -8,7 +8,8 @@ from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.parsers import MultiPartParser, FormParser
 from .serializers import ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer, UserSerializer
-from .models import Profile
+from .models import Profile, Friendship
+from django.db import models
 
 @api_view(["POST"])
 def register_user(request):
@@ -94,14 +95,121 @@ def remove_profile_picture(request):
 
     return Response({"message": "Profile picture removed successfully."}, status=status.HTTP_200_OK)
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def search_users(request):
+    query = request.GET.get('q', '')
+    if len(query) < 3:
+        return Response({"error": "Search query must be at least 3 characters"}, status=400)
+
+    users = User.objects.filter(username__icontains=query).exclude(id=request.user.id)
+    serializer = UserSerializer(users, many=True)
+    data = serializer.data
+
+    # Add friendship status for each user
+    for user_data in data:
+        user_data['friendship_status'] = get_friendship_status(request.user.id, user_data['id'])
+
+    return Response(data)
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])  # Only logged-in users can access
-def get_users(request):
-    users = User.objects.exclude(id=request.user.id)  # Exclude self from list
-    serializer = UserSerializer(users, many=True)
+@permission_classes([IsAuthenticated])
+def get_friends(request):
+    # Get all accepted friendships where the user is either sender or receiver
+    friendships = Friendship.objects.filter(
+        (models.Q(sender=request.user) | models.Q(receiver=request.user)),
+        status='ACCEPTED'
+    )
+
+    # Extract friend users from friendships
+    friends = []
+    for friendship in friendships:
+        friend = friendship.receiver if friendship.sender == request.user else friendship.sender
+        friends.append(friend)
+
+    serializer = UserSerializer(friends, many=True)
     return Response(serializer.data)
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def send_friend_request(request):
+    receiver_id = request.data.get('receiver')
+    if not receiver_id:
+        return Response({"error": "Receiver ID is required"}, status=400)
+
+    try:
+        receiver = User.objects.get(id=receiver_id)
+    except User.DoesNotExist:
+        return Response({"error": "User not found"}, status=404)
+
+    if Friendship.objects.filter(
+        (models.Q(sender=request.user, receiver=receiver) |
+         models.Q(sender=receiver, receiver=request.user)),
+        status='ACCEPTED'
+    ).exists():
+        return Response({"error": "Already friends"}, status=400)
+
+    friendship, created = Friendship.objects.get_or_create(
+        sender=request.user,
+        receiver=receiver,
+        defaults={'status': 'PENDING'}
+    )
+
+    if not created:
+        return Response({"error": "Friend request already sent"}, status=400)
+
+    return Response({"message": "Friend request sent successfully"})
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def respond_friend_request(request):
+    request_id = request.data.get('request_id')
+    action = request.data.get('action')
+
+    if action not in ['accept', 'reject']:
+        return Response({"error": "Invalid action"}, status=400)
+
+    try:
+        friendship = Friendship.objects.get(
+            id=request_id,
+            receiver=request.user,
+            status='PENDING'
+        )
+    except Friendship.DoesNotExist:
+        return Response({"error": "Friend request not found"}, status=404)
+
+    friendship.status = 'ACCEPTED' if action == 'accept' else 'REJECTED'
+    friendship.save()
+
+    return Response({"message": f"Friend request {action}ed"})
+
+def get_friendship_status(user1_id, user2_id):
+    try:
+        friendship = Friendship.objects.get(
+            (models.Q(sender_id=user1_id, receiver_id=user2_id) |
+             models.Q(sender_id=user2_id, receiver_id=user1_id))
+        )
+        return friendship.status
+    except Friendship.DoesNotExist:
+        return None
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_users(request):
+    # Get all accepted friendships
+    friendships = Friendship.objects.filter(
+        (models.Q(sender=request.user) | models.Q(receiver=request.user)),
+        status='ACCEPTED'
+    )
+
+    # Extract friend users from friendships
+    friends = []
+    for friendship in friendships:
+        friend = friendship.receiver if friendship.sender == request.user else friendship.sender
+        friends.append(friend)
+
+    serializer = UserSerializer(friends, many=True)
+    return Response(serializer.data)
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])  # ✅ Only Admins Can Access
@@ -139,3 +247,19 @@ def reject_user(request, user_id):
         return Response({"message": "User rejected successfully."})
     except Profile.DoesNotExist:
         return Response({"error": "User not found."}, status=404)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_friend_requests(request):
+    # Get pending friend requests where the current user is the receiver
+    friend_requests = Friendship.objects.filter(
+        receiver=request.user,
+        status='PENDING'
+    )
+
+    return Response([{
+        'id': request.id,
+        'sender_id': request.sender.id,
+        'sender_username': request.sender.username,
+        'created_at': request.created_at
+    } for request in friend_requests])

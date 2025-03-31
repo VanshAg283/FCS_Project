@@ -19,6 +19,7 @@ export default function Header() {
         {isLoggedIn ? (
           <>
             <Link to="/chat" className="mr-4">Chat</Link>
+            <Link to="/groups" className="mr-4">Groups</Link>
             {/* Admin Panel - Only for Admins */}
             {isAdmin && (  // ✅ Only show Admin Panel for admins
               <Link to="/admin" className="hover:underline text-yellow-300 font-semibold">

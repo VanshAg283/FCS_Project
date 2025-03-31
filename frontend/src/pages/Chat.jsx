@@ -72,8 +72,8 @@ export default function Chat() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          receiver: receiverId, // Ensure receiver ID is sent
-          text: newMessage, // Ensure message text is sent
+          receiver: receiverId,
+          text: newMessage,
         }),
       });
 
@@ -145,14 +145,14 @@ export default function Chat() {
             {msgs.map((msg) => (
               <div
                 key={msg.id}
-                className={`p-2 my-2 max-w-xs ${
+                className={`p-3 my-2 max-w-md ${
                   msg.is_sender
-                    ? "bg-blue-500 text-white self-end ml-auto"
-                    : "bg-white text-gray-900"
-                } rounded-lg shadow-md`}
+                    ? "bg-blue-500 text-white ml-auto rounded-l-lg rounded-tr-lg"
+                    : "bg-white text-gray-900 rounded-r-lg rounded-tl-lg"
+                }`}
               >
                 <p className="text-sm">{msg.decrypted_text}</p>
-                <p className="text-xs text-gray-500 mt-1 text-right">
+                <p className={`text-xs mt-1 text-right ${msg.is_sender ? "text-blue-100" : "text-gray-500"}`}>
                   {formatTime(msg.timestamp)}
                 </p>
               </div>
@@ -163,7 +163,7 @@ export default function Chat() {
       </div>
 
       {/* Message Input Sticks to Bottom */}
-      <div className="bg-white p-3 flex items-center border-t sticky bottom-0">
+      <form onSubmit={sendMessage} className="bg-white p-3 flex items-center border-t sticky bottom-0">
         <input
           type="text"
           value={newMessage}
@@ -172,12 +172,12 @@ export default function Chat() {
           className="flex-1 border rounded-lg px-3 py-2 focus:outline-none"
         />
         <button
-          onClick={sendMessage}
+          type="submit"
           className="ml-2 bg-blue-600 text-white px-4 py-2 rounded-lg"
         >
           Send
         </button>
-      </div>
+      </form>
     </div>
   );
 }

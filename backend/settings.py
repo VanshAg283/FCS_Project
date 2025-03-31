@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'authentication',
     'corsheaders',
     'chat',
+    'groupchat',
     'channels',
 ]
 
@@ -168,4 +169,4 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 
-ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY") 
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
