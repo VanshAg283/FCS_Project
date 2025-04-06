@@ -12,7 +12,9 @@ import Chat from "./pages/Chat";
 import AdminDashboard from "./pages/AdminDashboard";
 import GroupList from "./pages/GroupList";
 import GroupChat from "./pages/GroupChat";
-
+import VerificationPage from "./pages/VerificationPage";
+import Marketplace from "./pages/Marketplace";
+import DocumentViewer from "./pages/DocumentViewer";
 
 function Home() {
     const [message, setMessage] = useState("Loading...");
@@ -45,6 +47,16 @@ export default function App() {
             <Profile />
           </ProtectedRoute>
         } />
+        <Route path="/verification" element={
+          <ProtectedRoute>
+            <VerificationPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/marketplace" element={
+          <ProtectedRoute>
+            <Marketplace />
+          </ProtectedRoute>
+        } />
         <Route path="/chat" element={
           <ProtectedRoute>
             <ChatList />
@@ -66,8 +78,14 @@ export default function App() {
             <GroupChat />
           </ProtectedRoute>
         } />
-       {/* Admin Dashboard (Only for Admins) */}
-       <Route path="/admin" element={
+        {/* Document Viewer Route */}
+        <Route path="/document/:documentId" element={
+          <ProtectedRoute>
+            <DocumentViewer />
+          </ProtectedRoute>
+        } />
+        {/* Admin Dashboard (Only for Admins) */}
+        <Route path="/admin" element={
           isAdmin ? <AdminDashboard /> : <Navigate to="/" replace />
         } />
 

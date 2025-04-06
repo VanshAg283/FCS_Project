@@ -15,13 +15,20 @@ export default function Header() {
     <nav className="bg-blue-600 p-4 text-white flex justify-between items-center shadow-lg">
       <Link to="/" className="text-xl font-bold hover:underline">Chat App</Link>
 
+      {isLoggedIn && (
+        <div className="flex space-x-4">
+          <Link to="/chat" className="hover:underline">Chat</Link>
+          <Link to="/groups" className="hover:underline">Groups</Link>
+          <Link to="/marketplace" className="hover:underline">Marketplace</Link>
+          <Link to="/verification" className="hover:underline">Verification</Link>
+        </div>
+      )}
+
       <div className="flex items-center space-x-4">
         {isLoggedIn ? (
           <>
-            <Link to="/chat" className="mr-4">Chat</Link>
-            <Link to="/groups" className="mr-4">Groups</Link>
             {/* Admin Panel - Only for Admins */}
-            {isAdmin && (  // ✅ Only show Admin Panel for admins
+            {isAdmin && (
               <Link to="/admin" className="hover:underline text-yellow-300 font-semibold">
                 Admin Panel
               </Link>
@@ -34,6 +41,12 @@ export default function Header() {
               />
               <span className="ml-2 font-medium">{user?.username}</span>
             </Link>
+            <button
+              onClick={handleLogout}
+              className="bg-red-500 px-3 py-1 rounded hover:bg-red-600"
+            >
+              Logout
+            </button>
           </>
         ) : (
           <>

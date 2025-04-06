@@ -1,15 +1,21 @@
+import os
+import mimetypes
+from django.http import HttpResponse
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, AccessToken, TokenError
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.parsers import MultiPartParser, FormParser
-from .serializers import ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer, UserSerializer
-from .models import Profile, Friendship
+from .serializers import (ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer,
+                          UserSerializer, VerificationDocumentSerializer,
+                          VerificationDocumentSubmitSerializer, PendingVerificationSerializer)
+from .models import Profile, Friendship, VerificationDocument
 from django.db import models
+from django.utils import timezone
 
 @api_view(["POST"])
 def register_user(request):
@@ -215,36 +221,85 @@ def get_users(request):
 @permission_classes([IsAdminUser])  # ✅ Only Admins Can Access
 def admin_dashboard(request):
     users = User.objects.all()
-    user_data = [
-        {
-            "id": u.id,
-            "username": u.username,
-            "email": u.email,
-            "is_verified": hasattr(u, "profile") and u.profile.is_verified,  # ✅ Handle Missing Profile
-        }
-        for u in users
-    ]
+    user_data = []
+
+    for u in users:
+        try:
+            profile = Profile.objects.get(user=u)
+            # Count documents for this user
+            doc_count = VerificationDocument.objects.filter(user=u).count()
+
+            user_data.append({
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "verification_status": profile.verification_status,
+                "is_verified": profile.is_verified,
+                "has_documents": doc_count > 0,
+                "document_count": doc_count
+            })
+        except Profile.DoesNotExist:
+            user_data.append({
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "verification_status": "UNVERIFIED",
+                "is_verified": False,
+                "has_documents": False,
+                "document_count": 0
+            })
+
     return Response(user_data)
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])  # ✅ Admin only
+@permission_classes([IsAdminUser])
 def verify_user(request, user_id):
     try:
         profile = Profile.objects.get(user_id=user_id)
-        profile.is_verified = True
+        profile.verification_status = 'VERIFIED'
+        profile.verification_notes = request.data.get('notes', 'Verified by admin')
+        profile.verification_date = timezone.now()
         profile.save()
         return Response({"message": "User verified successfully."})
     except Profile.DoesNotExist:
         return Response({"error": "User not found."}, status=404)
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])  # ✅ Admin only
+@permission_classes([IsAdminUser])
 def reject_user(request, user_id):
     try:
         profile = Profile.objects.get(user_id=user_id)
-        profile.is_verified = False
+        profile.verification_status = 'REJECTED'
+        profile.verification_notes = request.data.get('notes', 'Rejected by admin')
+        profile.verification_date = timezone.now()
         profile.save()
         return Response({"message": "User rejected successfully."})
+    except Profile.DoesNotExist:
+        return Response({"error": "User not found."}, status=404)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def reset_user_verification(request, user_id):
+    """Reset a user's verification status to UNVERIFIED or PENDING (for testing)"""
+    try:
+        profile = Profile.objects.get(user_id=user_id)
+
+        # Check if user has documents
+        has_documents = VerificationDocument.objects.filter(user_id=user_id).exists()
+
+        # If user has documents, set to PENDING instead of UNVERIFIED
+        if has_documents:
+            profile.verification_status = 'PENDING'
+            message = "User verification status reset to PENDING (documents retained)."
+        else:
+            profile.verification_status = 'UNVERIFIED'
+            message = "User verification status reset to UNVERIFIED."
+
+        profile.verification_notes = request.data.get('notes', 'Reset for testing by admin')
+        profile.verification_date = timezone.now()
+        profile.save()
+
+        return Response({"message": message})
     except Profile.DoesNotExist:
         return Response({"error": "User not found."}, status=404)
 
@@ -263,3 +318,177 @@ def get_friend_requests(request):
         'sender_username': request.sender.username,
         'created_at': request.created_at
     } for request in friend_requests])
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_verification_status(request):
+    """Get user's verification status and documents"""
+    try:
+        profile = Profile.objects.get(user=request.user)
+        documents = VerificationDocument.objects.filter(user=request.user)
+
+        return Response({
+            "verification_status": profile.verification_status,
+            "is_verified": profile.is_verified,
+            "verification_notes": profile.verification_notes,
+            "verification_date": profile.verification_date,
+            "documents": VerificationDocumentSerializer(documents, many=True).data
+        })
+    except Profile.DoesNotExist:
+        return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def submit_verification_document(request):
+    """Submit a document for verification"""
+    serializer = VerificationDocumentSubmitSerializer(data=request.data)
+
+    if serializer.is_valid():
+        # Create the document
+        document = serializer.save(user=request.user)
+
+        # Update user's profile verification status to pending
+        profile, _ = Profile.objects.get_or_create(user=request.user)
+        profile.verification_status = 'PENDING'
+        profile.save()
+
+        return Response({
+            "message": "Document submitted successfully for verification",
+            "document": VerificationDocumentSerializer(document).data
+        }, status=status.HTTP_201_CREATED)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def get_pending_verifications(request):
+    """Get all profiles with pending verification status"""
+    pending_profiles = Profile.objects.filter(verification_status='PENDING')
+    serializer = PendingVerificationSerializer(pending_profiles, many=True, context={'request': request})
+    return Response(serializer.data)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def admin_document_review(request, doc_id):
+    """Review a verification document and update user's verification status"""
+    try:
+        document = VerificationDocument.objects.get(id=doc_id)
+    except VerificationDocument.DoesNotExist:
+        return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    action = request.data.get('action')
+    notes = request.data.get('notes', '')
+
+    if action not in ['approve', 'reject']:
+        return Response({"error": "Invalid action. Use 'approve' or 'reject'"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    profile = Profile.objects.get(user=document.user)
+    profile.verification_notes = notes
+    profile.verification_date = timezone.now()
+
+    if action == 'approve':
+        profile.verification_status = 'VERIFIED'
+        message = "User verification approved"
+    else:
+        profile.verification_status = 'REJECTED'
+        message = "User verification rejected"
+
+    profile.save()
+
+    return Response({"message": message, "user": document.user.username})
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def serve_document(request, document_id):
+    """Securely serve a document file with authorization check"""
+    try:
+        # Get the document
+        document = VerificationDocument.objects.get(id=document_id)
+
+        # Authorization check: Only document owner or admin can access
+        if document.user != request.user and not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get the file path
+        file_path = document.document_file.path
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Determine content type based on file extension
+        content_type = mimetypes.guess_type(file_path)[0]
+        if not content_type:
+            content_type = 'application/octet-stream'  # Default content type
+
+        # Open and serve the file
+        with open(file_path, 'rb') as file:
+            response = HttpResponse(file.read(), content_type=content_type)
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(file_path)}"'
+            return response
+
+    except VerificationDocument.DoesNotExist:
+        return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_document_info(request, document_id):
+    """Get document information without serving the actual file"""
+    try:
+        document = VerificationDocument.objects.get(id=document_id)
+
+        # Authorization check: Only document owner or admin can access
+        if document.user != request.user and not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = VerificationDocumentSerializer(document, context={"request": request})
+        return Response(serializer.data)
+
+    except VerificationDocument.DoesNotExist:
+        return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(["GET"])
+def document_view_with_token(request, document_id):
+    """Serve document file with token-based authentication"""
+    token = request.GET.get('token')
+
+    if not token:
+        return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        # Validate the token
+        validated_token = AccessToken(token)
+        user_id = validated_token['user_id']
+        user = User.objects.get(id=user_id)
+
+        # Get the document
+        document = VerificationDocument.objects.get(id=document_id)
+
+        # Check authorization
+        if document.user.id != user.id and not user.is_staff:
+            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get the file path
+        file_path = document.document_file.path
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Determine content type based on file extension
+        content_type = mimetypes.guess_type(file_path)[0]
+        if not content_type:
+            content_type = 'application/octet-stream'  # Default content type
+
+        # Open and serve the file
+        with open(file_path, 'rb') as file:
+            response = HttpResponse(file.read(), content_type=content_type)
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(file_path)}"'
+            return response
+
+    except (VerificationDocument.DoesNotExist, User.DoesNotExist):
+        return Response({"error": "Document or user not found"}, status=status.HTTP_404_NOT_FOUND)
+    except TokenError:
+        return Response({"error": "Invalid or expired token"}, status=status.HTTP_401_UNAUTHORIZED)
