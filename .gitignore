@@ -5,3 +5,4 @@ db.sqlite3
 *.log
 .env
 fix_migrations.py
+media/

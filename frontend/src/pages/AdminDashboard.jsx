@@ -7,10 +7,13 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [pendingVerifications, setPendingVerifications] = useState([]);
+  const [suspiciousActivity, setSuspiciousActivity] = useState([]);
   const [activeTab, setActiveTab] = useState("users");
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [reviewNotes, setReviewNotes] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -24,6 +27,8 @@ export default function AdminDashboard() {
       fetchUsers();
     } else if (activeTab === "verifications") {
       fetchPendingVerifications();
+    } else if (activeTab === "suspicious") {
+      fetchSuspiciousActivity();
     }
   }, [user, navigate, activeTab]);
 
@@ -58,6 +63,25 @@ export default function AdminDashboard() {
 
       const data = await response.json();
       setPendingVerifications(data);
+      setLoading(false);
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const fetchSuspiciousActivity = async () => {
+    setLoading(true);
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      let response = await fetch("/api/auth/admin/suspicious-activity/", {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+
+      if (!response.ok) throw new Error("Failed to fetch suspicious activity");
+
+      const data = await response.json();
+      setSuspiciousActivity(data);
       setLoading(false);
     } catch (err) {
       console.error(err);
@@ -163,6 +187,54 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleResolveSuspiciousActivity = async (attemptId) => {
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      await fetch(`/api/auth/admin/suspicious-activity/${attemptId}/resolve/`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      // Remove the resolved item from the list
+      setSuspiciousActivity(suspiciousActivity.filter(item => item.id !== attemptId));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const confirmDeleteUser = (userId, username) => {
+    setUserToDelete({ id: userId, username: username });
+    setShowDeleteConfirmation(true);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      const response = await fetch(`/api/auth/admin/user/${userToDelete.id}/delete/`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`
+        }
+      });
+
+      if (response.ok) {
+        // Remove user from the list
+        setUsers(users.filter(user => user.id !== userToDelete.id));
+        setShowDeleteConfirmation(false);
+        setUserToDelete(null);
+      } else {
+        console.error("Failed to delete user");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const viewDocument = (doc) => {
     console.log("Viewing document:", doc);
     setSelectedDocument(doc);
@@ -187,6 +259,12 @@ export default function AdminDashboard() {
           onClick={() => setActiveTab('verifications')}
         >
           Pending Verifications
+        </button>
+        <button
+          className={`py-2 px-4 mr-2 ${activeTab === 'suspicious' ? 'border-b-2 border-blue-500 font-semibold' : ''}`}
+          onClick={() => setActiveTab('suspicious')}
+        >
+          Suspicious Activity
         </button>
       </div>
 
@@ -235,6 +313,9 @@ export default function AdminDashboard() {
                       </button>
                       <button onClick={() => handleResetVerification(u.id)} className="bg-gray-500 px-3 py-1 rounded text-white mx-1">
                         Reset
+                      </button>
+                      <button onClick={() => confirmDeleteUser(u.id, u.username)} className="bg-red-700 px-3 py-1 rounded text-white mx-1">
+                        Delete
                       </button>
                     </td>
                   </tr>
@@ -314,6 +395,50 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+
+          {activeTab === 'suspicious' && (
+            <div>
+              <h2 className="text-xl font-semibold mb-4">Suspicious Activity</h2>
+
+              {suspiciousActivity.length === 0 ? (
+                <p className="text-center py-8 text-gray-500">No suspicious activity detected</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full bg-white">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="py-2 px-4 text-left">Username</th>
+                        <th className="py-2 px-4 text-left">IP Address</th>
+                        <th className="py-2 px-4 text-left">Time</th>
+                        <th className="py-2 px-4 text-left">Reason</th>
+                        <th className="py-2 px-4 text-left">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {suspiciousActivity.map((item) => (
+                        <tr key={item.id} className="border-t">
+                          <td className="py-2 px-4">{item.username}</td>
+                          <td className="py-2 px-4">{item.ip_address || "Unknown"}</td>
+                          <td className="py-2 px-4">
+                            {new Date(item.timestamp).toLocaleString()}
+                          </td>
+                          <td className="py-2 px-4">{item.reason}</td>
+                          <td className="py-2 px-4">
+                            <button
+                              onClick={() => handleResolveSuspiciousActivity(item.id)}
+                              className="bg-green-500 px-3 py-1 rounded text-white"
+                            >
+                              Resolve
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -378,6 +503,33 @@ export default function AdminDashboard() {
                 className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
               >
                 Approve
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {showDeleteConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 text-red-600">Delete User</h2>
+            <p className="mb-6">
+              Are you sure you want to delete user <strong>{userToDelete?.username}</strong>?
+              This action cannot be undone and will remove all user data.
+            </p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowDeleteConfirmation(false)}
+                className="px-4 py-2 border rounded text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteUser}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Delete User
               </button>
             </div>
           </div>

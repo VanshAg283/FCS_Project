@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useContext } from "react";
 import AuthContext from "./context/AuthContext";
 import Signup from "./pages/Signup";
+import EmailVerification from "./pages/EmailVerification";
 import Login from "./pages/Login";
 import Header from "./components/Header";
 import Profile from "./pages/Profile";
@@ -41,6 +42,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={isLoggedIn ? <Navigate to="/chat" /> : <Home />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/verify-email" element={<EmailVerification />} />
         <Route path="/login" element={<Login />} />
         <Route path="/profile" element={
           <ProtectedRoute>

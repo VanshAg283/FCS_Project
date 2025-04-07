@@ -1,56 +1,233 @@
 import os
 import mimetypes
+from datetime import timedelta
 from django.http import HttpResponse
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, AccessToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, TokenError
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.parsers import MultiPartParser, FormParser
+from django.conf import settings
 from .serializers import (ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer,
                           UserSerializer, VerificationDocumentSerializer,
-                          VerificationDocumentSubmitSerializer, PendingVerificationSerializer)
-from .models import Profile, Friendship, VerificationDocument
-from django.db import models
+                          VerificationDocumentSubmitSerializer, PendingVerificationSerializer,
+                          EmailVerificationSerializer, OTPVerificationSerializer)
+from .models import Profile, Friendship, VerificationDocument, OTPVerification, LoginAttempt
+from django.db import models, transaction
 from django.utils import timezone
+from .utils import generate_otp, send_otp_email, check_suspicious_activity
 
 @api_view(["POST"])
 def register_user(request):
-    data = request.data
-    if User.objects.filter(username=data["username"]).exists():
+    """
+    Register a new user - Step 1: Create unverified user and send OTP
+    """
+    serializer = EmailVerificationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    username = serializer.validated_data["username"]
+    email = serializer.validated_data["email"]
+    password = serializer.validated_data["password"]
+
+    # Check if username already exists
+    if User.objects.filter(username=username).exists():
         return Response({"error": "Username already taken"}, status=status.HTTP_400_BAD_REQUEST)
 
-    user = User.objects.create(
-        username=data["username"],
-        email=data["email"],
-        password=make_password(data["password"]),  # Hash password securely
-    )
-    Profile.objects.create(user=user)  # Create a profile for the user
+    # Check if email already exists
+    if User.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered"}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({"message": "User registered successfully"}, status=status.HTTP_201_CREATED)
+    # Create user but set is_active=False until email is verified
+    with transaction.atomic():
+        user = User.objects.create(
+            username=username,
+            email=email,
+            password=make_password(password),
+            is_active=False  # User cannot login until email is verified
+        )
+        Profile.objects.create(user=user)
+
+        # Generate and save OTP
+        otp = generate_otp()
+        OTPVerification.objects.create(
+            user=user,
+            otp=otp,
+            purpose="EMAIL_VERIFICATION"
+        )
+
+        # Send verification email
+        send_otp_email(user, otp)
+
+    return Response({
+        "message": "Registration initiated. Please verify your email with the OTP sent.",
+        "username": username
+    }, status=status.HTTP_201_CREATED)
+
+@api_view(["POST"])
+def verify_email(request):
+    """
+    Verify user's email using OTP - Step 2 of registration
+    """
+    serializer = OTPVerificationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    username = serializer.validated_data["username"]
+    otp = serializer.validated_data["otp"]
+
+    try:
+        user = User.objects.get(username=username, is_active=False)
+    except User.DoesNotExist:
+        return Response({"error": "Invalid username or already verified"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # Find the most recent unused OTP for this user
+    otp_record = OTPVerification.objects.filter(
+        user=user,
+        is_used=False,
+        purpose="EMAIL_VERIFICATION",
+        created_at__gte=timezone.now() - timedelta(minutes=settings.OTP_EXPIRY_MINUTES)
+    ).order_by('-created_at').first()
+
+    if not otp_record or otp_record.otp != otp:
+        return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Mark OTP as used
+    otp_record.is_used = True
+    otp_record.save()
+
+    # Activate user
+    user.is_active = True
+    user.save()
+
+    # Update profile
+    profile = Profile.objects.get(user=user)
+    profile.email_verified = True
+    profile.save()
+
+    # Generate tokens for immediate login
+    refresh = RefreshToken.for_user(user)
+
+    return Response({
+        "message": "Email verified successfully",
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_admin": user.is_staff
+        }
+    })
+
+@api_view(["POST"])
+def resend_verification_email(request):
+    """Resend verification email with new OTP"""
+    username = request.data.get("username")
+    if not username:
+        return Response({"error": "Username is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(username=username, is_active=False)
+    except User.DoesNotExist:
+        return Response({"error": "User not found or already verified"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # Generate and save new OTP
+    otp = generate_otp()
+    OTPVerification.objects.create(
+        user=user,
+        otp=otp,
+        purpose="EMAIL_VERIFICATION"
+    )
+
+    # Send verification email
+    send_otp_email(user, otp)
+
+    return Response({"message": "Verification email resent"})
 
 @api_view(["POST"])
 def login_user(request):
-    data = request.data
-    user = authenticate(username=data["username"], password=data["password"])
+    try:
+        data = request.data
+        username = data.get("username", "")
+        password = data.get("password", "")
 
-    if user is not None:
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            "refresh": str(refresh),
-            "access": str(refresh.access_token),
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "profile_picture": user.profile.profile_picture.url if user.profile.profile_picture else None,
-                "is_admin": user.is_superuser
-            }
-        })
-    return Response({"error": "Invalid Credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+        # Get IP and user agent for suspicious activity detection
+        ip_address = request.META.get('REMOTE_ADDR')
+        user_agent = request.META.get('HTTP_USER_AGENT')
+
+        # Check if settings exist, if not create defaults to avoid errors
+        if not hasattr(settings, 'LOGIN_ATTEMPT_WINDOW'):
+            setattr(settings, 'LOGIN_ATTEMPT_WINDOW', timedelta(hours=24))
+
+        # Check for suspicious activity before login attempt
+        try:
+            is_suspicious, reason = check_suspicious_activity(
+                username, ip_address, user_agent, login_success=False
+            )
+
+            if is_suspicious:
+                # Create a flagged login attempt
+                LoginAttempt.objects.filter(
+                    username=username,
+                    timestamp__gte=timezone.now() - settings.LOGIN_ATTEMPT_WINDOW
+                ).update(flagged=True)
+
+                return Response({
+                    "error": "Account temporarily locked due to suspicious activity. Please try again later."
+                }, status=status.HTTP_403_FORBIDDEN)
+        except Exception as e:
+            # If there's an error in suspicious activity check, just log it and continue
+            print(f"Error checking suspicious activity: {str(e)}")
+            # Don't block the login due to this error
+
+        user = authenticate(username=username, password=password)
+
+        if user is not None:
+            # Record successful login
+            try:
+                check_suspicious_activity(username, ip_address, user_agent, login_success=True)
+            except Exception as e:
+                print(f"Error recording successful login: {str(e)}")
+                # Don't block the login due to this error
+
+            refresh = RefreshToken.for_user(user)
+
+            # Get profile picture URL safely
+            profile_picture = None
+            try:
+                profile = Profile.objects.get(user=user)
+                if profile.profile_picture:
+                    profile_picture = request.build_absolute_uri(profile.profile_picture.url)
+            except Exception as e:
+                print(f"Error getting profile picture: {str(e)}")
+                # Don't fail if we can't get the profile picture
+
+            return Response({
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "profile_picture": profile_picture,
+                    "is_admin": user.is_superuser
+                }
+            })
+
+        # Login failed
+        return Response({"error": "Invalid Credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    except Exception as e:
+        print(f"Login error: {str(e)}")
+        return Response({"error": "An error occurred during login. Please try again."},
+                       status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -61,7 +238,9 @@ def user_profile(request):
         "username": request.user.username,
         "email": request.user.email,
         "profile_picture": request.build_absolute_uri(profile.profile_picture.url) if profile.profile_picture else None,
-        "is_admin": request.user.is_superuser
+        "bio": profile.bio,
+        "is_admin": request.user.is_superuser,
+        "email_verified": profile.email_verified
     })
 
 @api_view(["PUT"])
@@ -77,17 +256,63 @@ def update_profile(request):
         if user_serializer.is_valid():
             user_serializer.save()
 
-    # Update profile picture if provided
+    # Update profile fields if provided
+    profile_data = {}
     if "profile_picture" in request.data:
-        profile_serializer = ProfileUpdateSerializer(profile, data={"profile_picture": request.data["profile_picture"]}, partial=True)
+        profile_data["profile_picture"] = request.data["profile_picture"]
+    if "bio" in request.data:
+        profile_data["bio"] = request.data["bio"]
+
+    if profile_data:
+        profile_serializer = ProfileUpdateSerializer(profile, data=profile_data, partial=True)
         if profile_serializer.is_valid():
             profile_serializer.save()
 
     return Response({
         "message": "Profile updated successfully",
         "username": user.username,
-        "profile_picture": request.build_absolute_uri(profile.profile_picture.url) if profile.profile_picture else None
+        "profile_picture": request.build_absolute_uri(profile.profile_picture.url) if profile.profile_picture else None,
+        "bio": profile.bio
     })
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def get_suspicious_activity(request):
+    """Get flagged login attempts for admin review"""
+    flagged_attempts = LoginAttempt.objects.filter(flagged=True).order_by('-timestamp')
+
+    data = []
+    for attempt in flagged_attempts:
+        data.append({
+            "id": attempt.id,
+            "username": attempt.username,
+            "ip_address": attempt.ip_address,
+            "user_agent": attempt.user_agent,
+            "success": attempt.success,
+            "timestamp": attempt.timestamp,
+            "reason": "Multiple failed attempts"  # This could be more specific
+        })
+
+    return Response(data)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def resolve_suspicious_activity(request, attempt_id):
+    """Mark suspicious activity as resolved"""
+    try:
+        attempt = LoginAttempt.objects.get(id=attempt_id)
+        attempt.flagged = False
+        attempt.save()
+
+        # Also unflag other related attempts
+        LoginAttempt.objects.filter(
+            username=attempt.username,
+            timestamp__gte=timezone.now() - settings.LOGIN_ATTEMPT_WINDOW
+        ).update(flagged=False)
+
+        return Response({"message": "Suspicious activity resolved"})
+    except LoginAttempt.DoesNotExist:
+        return Response({"error": "Login attempt not found"}, status=404)
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
@@ -492,3 +717,45 @@ def document_view_with_token(request, document_id):
         return Response({"error": "Document or user not found"}, status=status.HTTP_404_NOT_FOUND)
     except TokenError:
         return Response({"error": "Invalid or expired token"}, status=status.HTTP_401_UNAUTHORIZED)
+
+@api_view(["DELETE"])
+@permission_classes([IsAdminUser])
+def delete_user(request, user_id):
+    """Delete a user account (admin only)"""
+    try:
+        user = User.objects.get(id=user_id)
+        username = user.username
+
+        # Delete the user
+        user.delete()
+
+        return Response({
+            "message": f"User {username} deleted successfully."
+        })
+    except User.DoesNotExist:
+        return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_own_account(request):
+    """Allow users to delete their own account"""
+    user = request.user
+    username = user.username
+
+    # Require password confirmation for security
+    password = request.data.get('password')
+    if not password:
+        return Response({"error": "Password is required to delete account"},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+    # Verify password
+    if not user.check_password(password):
+        return Response({"error": "Incorrect password"},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+    # Delete the user
+    user.delete()
+
+    return Response({
+        "message": f"Your account ({username}) has been deleted successfully."
+    })

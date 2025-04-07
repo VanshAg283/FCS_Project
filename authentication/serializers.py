@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Profile, VerificationDocument
+from .models import Profile, VerificationDocument, OTPVerification
 
 class UserSerializer(serializers.ModelSerializer):
     is_admin = serializers.BooleanField(source="is_staff", read_only=True)
@@ -12,20 +12,24 @@ class UserSerializer(serializers.ModelSerializer):
 
 class ProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    bio = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Profile
-        fields = ["user", "profile_picture", "is_verified"]
+        fields = ["user", "profile_picture", "is_verified", "bio", "email_verified"]
+
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
-        fields = ["profile_picture"]
+        fields = ["profile_picture", "bio"]
+
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ["username"]
+
 
 class VerificationDocumentSerializer(serializers.ModelSerializer):
     document_file_url = serializers.SerializerMethodField()
@@ -41,10 +45,12 @@ class VerificationDocumentSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(f'/api/auth/document/{obj.id}/')
         return None
 
+
 class VerificationDocumentSubmitSerializer(serializers.ModelSerializer):
     class Meta:
         model = VerificationDocument
         fields = ['document_type', 'document_file', 'description']
+
 
 class PendingVerificationSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -57,3 +63,14 @@ class PendingVerificationSerializer(serializers.ModelSerializer):
     def get_documents(self, obj):
         documents = VerificationDocument.objects.filter(user=obj.user)
         return VerificationDocumentSerializer(documents, many=True, context=self.context).data
+
+
+class EmailVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True)
+
+
+class OTPVerificationSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    otp = serializers.CharField(max_length=6)

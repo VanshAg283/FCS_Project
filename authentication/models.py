@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 from django.db import models
+import uuid
 
 class Profile(models.Model):
     VERIFICATION_STATUS_CHOICES = [
@@ -11,6 +12,7 @@ class Profile(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     profile_picture = models.ImageField(upload_to="profile_pics/", blank=True, null=True)
+    bio = models.TextField(blank=True, null=True, max_length=500)
 
     verification_status = models.CharField(
         max_length=10,
@@ -21,6 +23,7 @@ class Profile(models.Model):
     is_verified = models.BooleanField(default=False)  # Keeping for backwards compatibility
     verification_notes = models.TextField(blank=True, null=True)  # Admin feedback for rejection
     verification_date = models.DateTimeField(blank=True, null=True)  # When verification was completed
+    email_verified = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.user.username} - {self.verification_status}"
@@ -64,3 +67,26 @@ class Friendship(models.Model):
 
     class Meta:
         unique_together = ('sender', 'receiver')
+
+
+class OTPVerification(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_used = models.BooleanField(default=False)
+    purpose = models.CharField(max_length=20, default="EMAIL_VERIFICATION")
+
+    def __str__(self):
+        return f"{self.user.username} - {self.purpose} OTP"
+
+
+class LoginAttempt(models.Model):
+    username = models.CharField(max_length=150)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, null=True)
+    success = models.BooleanField(default=False)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    flagged = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.username} - {'Success' if self.success else 'Failed'} - {self.timestamp}"

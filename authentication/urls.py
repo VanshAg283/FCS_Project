@@ -5,11 +5,15 @@ from .views import (
     reject_user, search_users, send_friend_request, respond_friend_request,
     get_friends, get_friend_requests, submit_verification_document,
     get_verification_status, admin_document_review, get_pending_verifications,
-    serve_document, reset_user_verification, get_document_info, document_view_with_token
+    serve_document, reset_user_verification, get_document_info, document_view_with_token,
+    verify_email, resend_verification_email, get_suspicious_activity, resolve_suspicious_activity,
+    delete_user, delete_own_account
 )
 
 urlpatterns = [
     path("register/", register_user),
+    path("verify-email/", verify_email),
+    path("resend-verification/", resend_verification_email),
     path("login/", login_user),
     path("profile/", user_profile),
     path("profile/update/", update_profile, name="profile-update"),
@@ -31,4 +35,8 @@ urlpatterns = [
     path("document/<int:document_id>/info/", get_document_info, name="get_document_info"),
     path("document/<int:document_id>/view/", document_view_with_token, name="document_view_with_token"),
     path("admin/reset-verification/<int:user_id>/", reset_user_verification, name="reset_user_verification"),
+    path("admin/suspicious-activity/", get_suspicious_activity, name="get_suspicious_activity"),
+    path("admin/suspicious-activity/<int:attempt_id>/resolve/", resolve_suspicious_activity, name="resolve_suspicious_activity"),
+    path("admin/user/<int:user_id>/delete/", delete_user, name="delete_user"),
+    path("account/delete/", delete_own_account, name="delete_own_account"),
 ]

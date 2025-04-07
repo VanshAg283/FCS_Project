@@ -20,10 +20,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-a+3$g$m%ho#o#nkk43=7)=+!2jh$k)t%saw6uy7+zqfy=7!2z4'
+SECRET_KEY = "django-insecure-a+3$g$m%ho#o#nkk43=7)=+!2jh$k)t%saw6uy7+zqfy=7!2z4"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = [
     '127.0.0.1',
@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'chat',
     'groupchat',
+    # 'messaging',
     'channels',
 ]
 
@@ -81,7 +82,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'backend.wsgi.application'
-
+ASGI_APPLICATION = 'backend.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
@@ -170,3 +171,28 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+
+# Email settings for OTP
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # Prints emails to console
+DEFAULT_FROM_EMAIL = 'noreply@securechat.example.com'
+
+# Login security settings
+from datetime import timedelta
+LOGIN_ATTEMPT_WINDOW = timedelta(hours=24)
+MAX_FAILED_LOGINS = 5
+MAX_RAPID_ATTEMPTS = 10
+RAPID_ATTEMPT_SECONDS = 60
+SUSPICIOUS_IP_COUNT = 3
+OTP_EXPIRY_MINUTES = 10
+
+# Channel layer configuration (using in-memory for development, Redis recommended for production)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        # For production, use Redis:
+        # 'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        # 'CONFIG': {
+        #     "hosts": [('127.0.0.1', 6379)],
+        # },
+    },
+}
