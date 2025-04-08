@@ -43,7 +43,7 @@ def send_message(request):
     return Response(MessageSerializer(message).data, status=201)
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_messages(request, receiver_id):
     """Get chat messages with a specific user"""
@@ -65,56 +65,13 @@ def get_messages(request, receiver_id):
         (models.Q(sender=user, receiver=receiver) | models.Q(sender=receiver, receiver=user))
     ).order_by('timestamp')
 
-    # Format the messages with encryption and include blocked status
-    formatted_messages = []
-    for message in messages:
-        try:
-            # Skip messages from the blocked user if the current user is the one who blocked them
-            if user_blocked_receiver and message.sender == receiver:
-                continue
+    # Filter out messages from blocked users
+    if user_blocked_receiver:
+        messages = messages.filter(~models.Q(sender=receiver))
 
-            decrypted_text = message.get_decrypted_message()
-
-            # Get attachments
-            attachments = []
-            for attachment in message.attachments.all():
-                attachments.append({
-                    'id': attachment.id,
-                    'file_url': attachment.get_file_url(),
-                    'file_type': attachment.file_type,
-                    'original_filename': attachment.original_filename
-                })
-
-            formatted_messages.append({
-                'id': message.id,
-                'sender_id': message.sender.id,
-                'receiver_id': message.receiver.id,
-                'timestamp': message.timestamp,
-                'decrypted_text': decrypted_text,
-                'is_sender': message.sender == user,
-                'attachments': attachments,
-                'blocked': message.blocked
-            })
-        except Exception as e:
-            # If decryption fails, log the error and return a placeholder
-            print(f"Error decrypting message {message.id}: {e}")
-
-            # Skip error messages from blocked users too
-            if user_blocked_receiver and message.sender == receiver:
-                continue
-
-            formatted_messages.append({
-                'id': message.id,
-                'sender_id': message.sender.id,
-                'receiver_id': message.receiver.id,
-                'timestamp': message.timestamp,
-                'decrypted_text': "[Error decrypting message]",
-                'is_sender': message.sender == user,
-                'attachments': [],
-                'blocked': message.blocked
-            })
-
-    return Response(formatted_messages)
+    # Use the serializer to format the response
+    serializer = MessageSerializer(messages, many=True, context={"request": request})
+    return Response(serializer.data)
 
 
 @api_view(["POST"])

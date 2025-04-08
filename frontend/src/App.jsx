@@ -17,6 +17,8 @@ import VerificationPage from "./pages/VerificationPage";
 import Marketplace from "./pages/Marketplace";
 import DocumentViewer from "./pages/DocumentViewer";
 import AdminUnlock from "./pages/AdminUnlock";
+import ProductDetail from "./pages/ProductDetail";
+import AddProduct from "./pages/AddProduct";
 
 function Home() {
     const [message, setMessage] = useState("Loading...");
@@ -56,9 +58,25 @@ export default function App() {
             <VerificationPage />
           </ProtectedRoute>
         } />
+        {/* Marketplace Routes */}
         <Route path="/marketplace" element={
           <ProtectedRoute>
             <Marketplace />
+          </ProtectedRoute>
+        } />
+        <Route path="/marketplace/:productId" element={
+          <ProtectedRoute>
+            <ProductDetail />
+          </ProtectedRoute>
+        } />
+        <Route path="/marketplace/new" element={
+          <ProtectedRoute>
+            <AddProduct />
+          </ProtectedRoute>
+        } />
+        <Route path="/marketplace/edit/:productId" element={
+          <ProtectedRoute>
+            <AddProduct isEdit={true} />
           </ProtectedRoute>
         } />
         <Route path="/chat" element={

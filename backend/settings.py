@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'chat',
     'groupchat',
+    'marketplace',
     # 'messaging',
     'channels',
 ]

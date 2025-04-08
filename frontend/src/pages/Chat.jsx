@@ -242,8 +242,18 @@ export default function Chat() {
   }, {});
 
   const getAuthenticatedMediaUrl = (path) => {
+    if (!path) return ''; // Guard against null paths
+
+    const accessToken = localStorage.getItem("access_token");
+    // If the path is already a full URL, just append the token
+    if (path.startsWith('http')) {
+      return `${path}${path.includes('?') ? '&' : '?'}auth_token=${accessToken}`;
+    }
+
+    // Otherwise, construct the full URL
     const baseUrl = window.location.origin;
-    const fullPath = `${baseUrl}${path}?auth_token=${authToken}`;
+    const fullPath = `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}${path.includes('?') ? '&' : '?'}auth_token=${accessToken}`;
+    console.log("Image URL:", fullPath); // Debug the image URL
     return fullPath;
   };
 
@@ -330,6 +340,7 @@ export default function Chat() {
                     {msg.attachments &&
                       msg.attachments.map((attachment) => (
                         <div key={attachment.id} className="mt-2">
+                          {console.log("Attachment:", attachment)} {/* Debug attachment data */}
                           {attachment.file_type === "svg" ? (
                             <img
                               src={getAuthenticatedMediaUrl(attachment.file_url)}
@@ -337,7 +348,7 @@ export default function Chat() {
                               className="max-w-full rounded-md"
                               loading="lazy"
                               onError={(e) => {
-                                console.error("SVG loading error");
+                                console.error("SVG loading error for URL:", e.target.src);
                                 e.target.src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iMTIiIHk9IjEyIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmaWxsPSIjYWFhYWFhIj5TVkc8L3RleHQ+PC9zdmc+";
                               }}
                             />
@@ -348,7 +359,7 @@ export default function Chat() {
                               className="max-w-full rounded-md"
                               loading="lazy"
                               onError={(e) => {
-                                console.error("Image loading error");
+                                console.error("Image loading error for URL:", e.target.src);
                                 e.target.src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iMTIiIHk9IjEyIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmaWxsPSIjYWFhYWFhIj5JbWFnZSBFcnJvcjwvdGV4dD48L3N2Zz4=";
                               }}
                             />

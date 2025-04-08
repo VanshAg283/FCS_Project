@@ -26,6 +26,7 @@ urlpatterns = [
     path("api/chat/", include("chat.urls")),
     path("api/groupchat/", include("groupchat.urls")),
     # path("api/messaging/", include("messaging.urls")),
+    path('api/marketplace/', include('marketplace.urls', namespace='marketplace')),
 ]
 
 # ✅ Serve media files in development mode
