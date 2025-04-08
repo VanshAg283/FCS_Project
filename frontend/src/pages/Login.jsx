@@ -110,6 +110,11 @@ export default function Login() {
           <p className="text-gray-600">
             Don't have an account? <Link to="/signup" className="text-blue-500 hover:underline">Sign up</Link>
           </p>
+          <p className="text-gray-600 mt-2 text-sm">
+            <Link to="/admin-unlock" className="text-blue-500 hover:underline">
+              Unlock Admin Account
+            </Link>
+          </p>
         </div>
       </form>
     </div>

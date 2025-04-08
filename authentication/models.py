@@ -1,6 +1,10 @@
 from django.contrib.auth.models import User
 from django.db import models
 import uuid
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.utils import timezone
+from datetime import timedelta
 
 class Profile(models.Model):
     VERIFICATION_STATUS_CHOICES = [
@@ -90,3 +94,66 @@ class LoginAttempt(models.Model):
 
     def __str__(self):
         return f"{self.username} - {'Success' if self.success else 'Failed'} - {self.timestamp}"
+
+
+class Report(models.Model):
+    REPORT_TYPES = [
+        ('ABUSE', 'Abusive Content'),
+        ('SPAM', 'Spam'),
+        ('FAKE', 'Fake Account'),
+        ('INAPPROPRIATE', 'Inappropriate Content'),
+        ('OTHER', 'Other')
+    ]
+
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending Review'),
+        ('REVIEWING', 'Under Review'),
+        ('RESOLVED', 'Resolved'),
+        ('DISMISSED', 'Dismissed')
+    ]
+
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports_filed')
+    reported_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports_received')
+    report_type = models.CharField(max_length=20, choices=REPORT_TYPES)
+    content = models.TextField()  # Description of the issue
+    evidence_screenshot = models.ImageField(upload_to='report_evidence/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    admin_notes = models.TextField(blank=True, null=True)  # For admin use
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reports_resolved')
+
+    def __str__(self):
+        return f"{self.reporter.username} reported {self.reported_user.username} for {self.get_report_type_display()}"
+
+
+class UserBlock(models.Model):
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocking')
+    blocked = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocked_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('blocker', 'blocked')
+
+    def __str__(self):
+        return f"{self.blocker.username} blocked {self.blocked.username}"
+
+
+@receiver(post_save, sender=UserBlock)
+def handle_block_updates(sender, instance, created, **kwargs):
+    """When a user blocks someone, update any active chats or friend relationships"""
+    from chat.models import Message
+
+    if created:
+        # Instead of deleting friendships, we just mark messages as blocked
+        # This way the friendship and chat history remain intact
+
+        # Mark messages as blocked instead of deleting them
+        Message.objects.filter(
+            (models.Q(sender=instance.blocker, receiver=instance.blocked) |
+             models.Q(sender=instance.blocked, receiver=instance.blocker)),
+            timestamp__gte=timezone.now() - timedelta(days=7)  # Changed created_at to timestamp
+        ).update(blocked=True)
+
+        # DON'T delete the friendship
+        # We've removed this line: Friendship.objects.filter(...).delete()

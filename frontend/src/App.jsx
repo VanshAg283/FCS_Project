@@ -16,6 +16,7 @@ import GroupChat from "./pages/GroupChat";
 import VerificationPage from "./pages/VerificationPage";
 import Marketplace from "./pages/Marketplace";
 import DocumentViewer from "./pages/DocumentViewer";
+import AdminUnlock from "./pages/AdminUnlock";
 
 function Home() {
     const [message, setMessage] = useState("Loading...");
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/signup" element={<Signup />} />
         <Route path="/verify-email" element={<EmailVerification />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/admin-unlock" element={<AdminUnlock />} />
         <Route path="/profile" element={
           <ProtectedRoute>
             <Profile />

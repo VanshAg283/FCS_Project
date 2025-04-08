@@ -7,7 +7,9 @@ from .views import (
     get_verification_status, admin_document_review, get_pending_verifications,
     serve_document, reset_user_verification, get_document_info, document_view_with_token,
     verify_email, resend_verification_email, get_suspicious_activity, resolve_suspicious_activity,
-    delete_user, delete_own_account
+    delete_user, delete_own_account, admin_account_unlock, admin_reset_login_attempts,
+    report_user, get_my_reports, block_user, unblock_user, get_blocked_users,
+    get_all_reports, update_report_status
 )
 
 urlpatterns = [
@@ -39,4 +41,17 @@ urlpatterns = [
     path("admin/suspicious-activity/<int:attempt_id>/resolve/", resolve_suspicious_activity, name="resolve_suspicious_activity"),
     path("admin/user/<int:user_id>/delete/", delete_user, name="delete_user"),
     path("account/delete/", delete_own_account, name="delete_own_account"),
+    path("admin-unlock/", admin_account_unlock, name="admin_account_unlock"),
+    path("admin/reset-login-attempts/", admin_reset_login_attempts, name="admin_reset_login_attempts"),
+
+    # Report & Block endpoints
+    path("report/", report_user, name="report_user"),
+    path("reports/", get_my_reports, name="get_my_reports"),
+    path("block/", block_user, name="block_user"),
+    path("unblock/<int:user_id>/", unblock_user, name="unblock_user"),
+    path("blocks/", get_blocked_users, name="get_blocked_users"),
+
+    # Admin report management
+    path("admin/reports/", get_all_reports, name="get_all_reports"),
+    path("admin/report/<int:report_id>/update/", update_report_status, name="update_report_status"),
 ]

@@ -11,6 +11,7 @@ class Message(models.Model):
     receiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name="received_messages")
     encrypted_text = models.BinaryField()  # BinaryField stores bytes directly
     timestamp = models.DateTimeField(auto_now_add=True)
+    blocked = models.BooleanField(default=False)  # Whether this message was sent to someone who blocked the sender
 
     def save(self, *args, **kwargs):
         """Encrypt message before saving"""

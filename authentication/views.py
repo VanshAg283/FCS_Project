@@ -15,8 +15,9 @@ from django.conf import settings
 from .serializers import (ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer,
                           UserSerializer, VerificationDocumentSerializer,
                           VerificationDocumentSubmitSerializer, PendingVerificationSerializer,
-                          EmailVerificationSerializer, OTPVerificationSerializer)
-from .models import Profile, Friendship, VerificationDocument, OTPVerification, LoginAttempt
+                          EmailVerificationSerializer, OTPVerificationSerializer,
+                          ReportCreateSerializer, ReportSerializer, UserBlockSerializer)
+from .models import Profile, Friendship, VerificationDocument, OTPVerification, LoginAttempt, Report, UserBlock
 from django.db import models, transaction
 from django.utils import timezone
 from .utils import generate_otp, send_otp_email, check_suspicious_activity
@@ -179,8 +180,12 @@ def login_user(request):
                     timestamp__gte=timezone.now() - settings.LOGIN_ATTEMPT_WINDOW
                 ).update(flagged=True)
 
+                # Calculate when the account will auto-unblock
+                auto_unblock_hours = getattr(settings, 'ACCOUNT_AUTO_UNBLOCK_HOURS', 1)
+                unblock_time = timezone.now() + timedelta(hours=auto_unblock_hours)
+
                 return Response({
-                    "error": "Account temporarily locked due to suspicious activity. Please try again later."
+                    "error": f"Account temporarily locked due to suspicious activity. The account will be automatically unlocked in {auto_unblock_hours} hours at {unblock_time.strftime('%Y-%m-%d %H:%M:%S')}."
                 }, status=status.HTTP_403_FORBIDDEN)
         except Exception as e:
             # If there's an error in suspicious activity check, just log it and continue
@@ -313,6 +318,69 @@ def resolve_suspicious_activity(request, attempt_id):
         return Response({"message": "Suspicious activity resolved"})
     except LoginAttempt.DoesNotExist:
         return Response({"error": "Login attempt not found"}, status=404)
+
+@api_view(["POST"])
+def admin_account_unlock(request):
+    """Special endpoint to unlock admin accounts that were locked due to suspicious activity"""
+    username = request.data.get('username')
+    master_key = request.data.get('master_key')
+
+    # Check if the master key matches the one in settings
+    if not hasattr(settings, 'ADMIN_MASTER_KEY') or master_key != settings.ADMIN_MASTER_KEY:
+        return Response({"error": "Invalid master key"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Find the user
+        user = User.objects.get(username=username)
+
+        # Check if the user is an admin
+        if not (user.is_staff or user.is_superuser):
+            return Response({"error": "This feature is only for admin accounts"},
+                          status=status.HTTP_403_FORBIDDEN)
+
+        # Delete all login attempts for this user to completely reset the account's login history
+        LoginAttempt.objects.filter(username=username).delete()
+
+        # Ensure account is active
+        if not user.is_active:
+            user.is_active = True
+            user.save()
+
+        # Generate tokens so admin can login immediately
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            "message": f"Admin account {username} has been unlocked successfully. You can now log in.",
+            "refresh": str(refresh),
+            "access": str(refresh.access_token)
+        })
+    except User.DoesNotExist:
+        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def admin_reset_login_attempts(request):
+    """Reset all login attempts for a user to completely unblock them"""
+    username = request.data.get('username')
+    if not username:
+        return Response({"error": "Username is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Delete all login attempts for this user
+    deleted_count = LoginAttempt.objects.filter(username=username).delete()[0]
+
+    # Ensure user account is active
+    try:
+        user = User.objects.get(username=username)
+        if not user.is_active:
+            user.is_active = True
+            user.save()
+    except User.DoesNotExist:
+        pass  # If user doesn't exist, just continue
+
+    return Response({
+        "message": f"Successfully cleared all login history for {username}. Account is now unblocked.",
+        "deleted_count": deleted_count
+    })
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
@@ -758,4 +826,152 @@ def delete_own_account(request):
 
     return Response({
         "message": f"Your account ({username}) has been deleted successfully."
+    })
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def report_user(request):
+    """Report a user for inappropriate behavior or content"""
+    serializer = ReportCreateSerializer(data=request.data)
+
+    if serializer.is_valid():
+        # Check if we're trying to report ourselves
+        if serializer.validated_data["reported_user"] == request.user:
+            return Response({"error": "You cannot report yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create the report
+        report = serializer.save(reporter=request.user)
+
+        return Response({
+            "message": "Report submitted successfully. An admin will review it.",
+            "report_id": report.id
+        }, status=status.HTTP_201_CREATED)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_my_reports(request):
+    """Get reports filed by the current user"""
+    reports = Report.objects.filter(reporter=request.user)
+    serializer = ReportSerializer(reports, many=True)
+    return Response(serializer.data)
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def block_user(request):
+    """Block a user"""
+    try:
+        # Extract the user_id from request data
+        user_id = request.data.get('user_id')
+
+        print(f"Received block request for user_id: {user_id}")
+
+        if not user_id:
+            return Response({"error": "User ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Convert to integer if it's a string
+            if isinstance(user_id, str) and user_id.isdigit():
+                user_id = int(user_id)
+
+            user_to_block = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": f"User with ID {user_id} not found"}, status=status.HTTP_404_NOT_FOUND)
+        except ValueError:
+            return Response({"error": f"Invalid user ID format: {user_id}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Can't block yourself
+        if user_to_block == request.user:
+            return Response({"error": "You cannot block yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if already blocked
+        if UserBlock.objects.filter(blocker=request.user, blocked=user_to_block).exists():
+            return Response({"error": "You have already blocked this user"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create block
+        block = UserBlock.objects.create(blocker=request.user, blocked=user_to_block)
+
+        return Response({
+            "message": f"User {user_to_block.username} has been blocked",
+            "block_id": block.id
+        }, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        import traceback
+        print(f"Error in block_user: {str(e)}")
+        traceback.print_exc()
+        return Response({"error": f"An error occurred: {str(e)}"},
+                     status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def unblock_user(request, user_id):
+    """Unblock a previously blocked user"""
+    try:
+        user_to_unblock = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        block = UserBlock.objects.get(blocker=request.user, blocked=user_to_unblock)
+        block.delete()
+        return Response({"message": f"User {user_to_unblock.username} has been unblocked"})
+    except UserBlock.DoesNotExist:
+        return Response({"error": "You have not blocked this user"}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_blocked_users(request):
+    """Get list of users blocked by the current user"""
+    blocks = UserBlock.objects.filter(blocker=request.user)
+    serializer = UserBlockSerializer(blocks, many=True)
+    return Response(serializer.data)
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def get_all_reports(request):
+    """Get all reports (admin only)"""
+    status_filter = request.query_params.get('status')
+
+    if status_filter:
+        reports = Report.objects.filter(status=status_filter).order_by('-created_at')
+    else:
+        reports = Report.objects.all().order_by('-created_at')
+
+    serializer = ReportSerializer(reports, many=True)
+    return Response(serializer.data)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def update_report_status(request, report_id):
+    """Update a report's status (admin only)"""
+    try:
+        report = Report.objects.get(id=report_id)
+    except Report.DoesNotExist:
+        return Response({"error": "Report not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    new_status = request.data.get('status')
+    admin_notes = request.data.get('admin_notes')
+
+    if not new_status:
+        return Response({"error": "Status is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if new_status not in dict(Report.STATUS_CHOICES):
+        return Response({"error": "Invalid status"}, status=status.HTTP_400_BAD_REQUEST)
+
+    report.status = new_status
+
+    if admin_notes:
+        report.admin_notes = admin_notes
+
+    if new_status in ['RESOLVED', 'DISMISSED']:
+        report.resolved_at = timezone.now()
+        report.resolved_by = request.user
+
+    report.save()
+
+    return Response({
+        "message": f"Report status updated to {report.get_status_display()}",
+        "report_id": report.id
     })

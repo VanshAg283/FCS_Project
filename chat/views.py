@@ -43,16 +43,78 @@ def send_message(request):
     return Response(MessageSerializer(message).data, status=201)
 
 
-@api_view(["GET"])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_messages(request, receiver_id):
-    messages = Message.objects.filter(
-        models.Q(sender=request.user, receiver_id=receiver_id) |
-        models.Q(sender_id=receiver_id, receiver=request.user)
-    ).order_by("timestamp")
+    """Get chat messages with a specific user"""
+    user = request.user
+    try:
+        receiver = User.objects.get(id=receiver_id)
+    except User.DoesNotExist:
+        return Response({"error": "Receiver not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    serializer = MessageSerializer(messages, many=True, context={"request": request})
-    return Response(serializer.data)
+    # Check if the current user has blocked the receiver
+    from authentication.models import UserBlock
+    user_blocked_receiver = UserBlock.objects.filter(
+        blocker=user,
+        blocked=receiver
+    ).exists()
+
+    # Get all messages between these users
+    messages = Message.objects.filter(
+        (models.Q(sender=user, receiver=receiver) | models.Q(sender=receiver, receiver=user))
+    ).order_by('timestamp')
+
+    # Format the messages with encryption and include blocked status
+    formatted_messages = []
+    for message in messages:
+        try:
+            # Skip messages from the blocked user if the current user is the one who blocked them
+            if user_blocked_receiver and message.sender == receiver:
+                continue
+
+            decrypted_text = message.get_decrypted_message()
+
+            # Get attachments
+            attachments = []
+            for attachment in message.attachments.all():
+                attachments.append({
+                    'id': attachment.id,
+                    'file_url': attachment.get_file_url(),
+                    'file_type': attachment.file_type,
+                    'original_filename': attachment.original_filename
+                })
+
+            formatted_messages.append({
+                'id': message.id,
+                'sender_id': message.sender.id,
+                'receiver_id': message.receiver.id,
+                'timestamp': message.timestamp,
+                'decrypted_text': decrypted_text,
+                'is_sender': message.sender == user,
+                'attachments': attachments,
+                'blocked': message.blocked
+            })
+        except Exception as e:
+            # If decryption fails, log the error and return a placeholder
+            print(f"Error decrypting message {message.id}: {e}")
+
+            # Skip error messages from blocked users too
+            if user_blocked_receiver and message.sender == receiver:
+                continue
+
+            formatted_messages.append({
+                'id': message.id,
+                'sender_id': message.sender.id,
+                'receiver_id': message.receiver.id,
+                'timestamp': message.timestamp,
+                'decrypted_text': "[Error decrypting message]",
+                'is_sender': message.sender == user,
+                'attachments': [],
+                'blocked': message.blocked
+            })
+
+    return Response(formatted_messages)
 
 
 @api_view(["POST"])

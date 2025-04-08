@@ -172,6 +172,9 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
+# Admin master key for unlocking admin accounts
+ADMIN_MASTER_KEY = os.getenv("ADMIN_MASTER_KEY")  # In production, use environment variables for this
+
 # Email settings for OTP
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # Prints emails to console
 DEFAULT_FROM_EMAIL = 'noreply@securechat.example.com'
@@ -184,6 +187,7 @@ MAX_RAPID_ATTEMPTS = 10
 RAPID_ATTEMPT_SECONDS = 60
 SUSPICIOUS_IP_COUNT = 3
 OTP_EXPIRY_MINUTES = 10
+ACCOUNT_AUTO_UNBLOCK_HOURS = 1  # Accounts automatically unblock after this many hours
 
 # Channel layer configuration (using in-memory for development, Redis recommended for production)
 CHANNEL_LAYERS = {

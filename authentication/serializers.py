@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Profile, VerificationDocument, OTPVerification
+from .models import Profile, VerificationDocument, OTPVerification, Report, UserBlock
 
 class UserSerializer(serializers.ModelSerializer):
     is_admin = serializers.BooleanField(source="is_staff", read_only=True)
@@ -74,3 +74,43 @@ class EmailVerificationSerializer(serializers.Serializer):
 class OTPVerificationSerializer(serializers.Serializer):
     username = serializers.CharField()
     otp = serializers.CharField(max_length=6)
+
+
+class ReportSerializer(serializers.ModelSerializer):
+    reporter_username = serializers.SerializerMethodField()
+    reported_username = serializers.SerializerMethodField()
+    report_type_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Report
+        fields = ['id', 'reporter', 'reporter_username', 'reported_user', 'reported_username',
+                  'report_type', 'report_type_display', 'content', 'evidence_screenshot',
+                  'created_at', 'status', 'admin_notes', 'resolved_at']
+        read_only_fields = ['reporter', 'status', 'admin_notes', 'resolved_at', 'resolved_by']
+
+    def get_reporter_username(self, obj):
+        return obj.reporter.username
+
+    def get_reported_username(self, obj):
+        return obj.reported_user.username
+
+    def get_report_type_display(self, obj):
+        return obj.get_report_type_display()
+
+
+class ReportCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Report
+        fields = ['reported_user', 'report_type', 'content', 'evidence_screenshot']
+
+
+class UserBlockSerializer(serializers.ModelSerializer):
+    blocked_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserBlock
+        fields = ['id', 'blocked', 'blocked_username', 'created_at']
+        read_only_fields = ['blocker', 'created_at']
+
+    def get_blocked_username(self, obj):
+        return obj.blocked.username

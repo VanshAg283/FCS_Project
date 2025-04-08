@@ -14,6 +14,14 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [userToDelete, setUserToDelete] = useState(null);
+  const [showResetLoginAttemptsModal, setShowResetLoginAttemptsModal] = useState(false);
+  const [usernameToReset, setUsernameToReset] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
+
+  const [reports, setReports] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [reportStatusFilter, setReportStatusFilter] = useState("PENDING");
+  const [reportAdminNotes, setReportAdminNotes] = useState("");
 
   useEffect(() => {
     if (!user) return;
@@ -29,8 +37,10 @@ export default function AdminDashboard() {
       fetchPendingVerifications();
     } else if (activeTab === "suspicious") {
       fetchSuspiciousActivity();
+    } else if (activeTab === "reports") {
+      fetchReports();
     }
-  }, [user, navigate, activeTab]);
+  }, [user, navigate, activeTab, reportStatusFilter]);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -89,6 +99,30 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchReports = async () => {
+    setLoading(true);
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      let url = "/api/auth/admin/reports/";
+      if (reportStatusFilter) {
+        url += `?status=${reportStatusFilter}`;
+      }
+
+      let response = await fetch(url, {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+
+      if (!response.ok) throw new Error("Failed to fetch reports");
+
+      const data = await response.json();
+      setReports(data);
+      setLoading(false);
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
   const handleVerify = async (userId) => {
     let accessToken = localStorage.getItem("access_token");
     try {
@@ -137,19 +171,15 @@ export default function AdminDashboard() {
 
       const data = await response.json();
 
-      // Update UI based on message returned from backend
       if (data.message.includes("PENDING")) {
-        // If it was reset to PENDING
         setUsers(users.map((u) => (u.id === userId ? {
           ...u,
           verification_status: "PENDING",
           is_verified: false
         } : u)));
 
-        // Refresh pending verifications to show the newly reset user
         fetchPendingVerifications();
       } else {
-        // If it was reset to UNVERIFIED
         setUsers(users.map((u) => (u.id === userId ? {
           ...u,
           verification_status: "UNVERIFIED",
@@ -178,7 +208,6 @@ export default function AdminDashboard() {
         })
       });
 
-      // Close modal and refresh data
       setSelectedDocument(null);
       setReviewNotes("");
       fetchPendingVerifications();
@@ -198,7 +227,6 @@ export default function AdminDashboard() {
         }
       });
 
-      // Remove the resolved item from the list
       setSuspiciousActivity(suspiciousActivity.filter(item => item.id !== attemptId));
     } catch (err) {
       console.error(err);
@@ -223,12 +251,75 @@ export default function AdminDashboard() {
       });
 
       if (response.ok) {
-        // Remove user from the list
         setUsers(users.filter(user => user.id !== userToDelete.id));
         setShowDeleteConfirmation(false);
         setUserToDelete(null);
       } else {
         console.error("Failed to delete user");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleResetLoginAttempts = async () => {
+    if (!usernameToReset) {
+      setResetMessage("Please enter a username");
+      return;
+    }
+
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      const response = await fetch("/api/auth/admin/reset-login-attempts/", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ username: usernameToReset })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setResetMessage(data.message);
+        fetchSuspiciousActivity();
+
+        setTimeout(() => {
+          setShowResetLoginAttemptsModal(false);
+          setUsernameToReset("");
+          setResetMessage("");
+        }, 3000);
+      } else {
+        setResetMessage(data.error || "Failed to reset login attempts");
+      }
+    } catch (err) {
+      console.error(err);
+      setResetMessage("An error occurred");
+    }
+  };
+
+  const handleUpdateReportStatus = async (reportId, newStatus) => {
+    let accessToken = localStorage.getItem("access_token");
+    try {
+      const response = await fetch(`/api/auth/admin/report/${reportId}/update/`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          admin_notes: reportAdminNotes
+        })
+      });
+
+      if (response.ok) {
+        fetchReports();
+        setSelectedReport(null);
+        setReportAdminNotes("");
+      } else {
+        console.error("Failed to update report status");
       }
     } catch (err) {
       console.error(err);
@@ -246,7 +337,6 @@ export default function AdminDashboard() {
     <div className="container mx-auto p-6">
       <h1 className="text-3xl font-bold text-center mb-8">Admin Dashboard</h1>
 
-      {/* Tabs */}
       <div className="flex border-b mb-6">
         <button
           className={`py-2 px-4 mr-2 ${activeTab === 'users' ? 'border-b-2 border-blue-500 font-semibold' : ''}`}
@@ -265,6 +355,12 @@ export default function AdminDashboard() {
           onClick={() => setActiveTab('suspicious')}
         >
           Suspicious Activity
+        </button>
+        <button
+          className={`py-2 px-4 mr-2 ${activeTab === 'reports' ? 'border-b-2 border-blue-500 font-semibold' : ''}`}
+          onClick={() => setActiveTab('reports')}
+        >
+          User Reports
         </button>
       </div>
 
@@ -398,7 +494,15 @@ export default function AdminDashboard() {
 
           {activeTab === 'suspicious' && (
             <div>
-              <h2 className="text-xl font-semibold mb-4">Suspicious Activity</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Suspicious Activity</h2>
+                <button
+                  onClick={() => setShowResetLoginAttemptsModal(true)}
+                  className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                >
+                  Reset User Login History
+                </button>
+              </div>
 
               {suspiciousActivity.length === 0 ? (
                 <p className="text-center py-8 text-gray-500">No suspicious activity detected</p>
@@ -439,10 +543,77 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+
+          {activeTab === 'reports' && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">User Reports</h2>
+                <div>
+                  <select
+                    value={reportStatusFilter}
+                    onChange={(e) => setReportStatusFilter(e.target.value)}
+                    className="p-2 border rounded"
+                  >
+                    <option value="">All Reports</option>
+                    <option value="PENDING">Pending Review</option>
+                    <option value="REVIEWING">Under Review</option>
+                    <option value="RESOLVED">Resolved</option>
+                    <option value="DISMISSED">Dismissed</option>
+                  </select>
+                </div>
+              </div>
+
+              {reports.length === 0 ? (
+                <p className="text-center py-8 text-gray-500">No reports found</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full bg-white">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="py-2 px-4 text-left">Reporter</th>
+                        <th className="py-2 px-4 text-left">Reported User</th>
+                        <th className="py-2 px-4 text-left">Type</th>
+                        <th className="py-2 px-4 text-left">Date</th>
+                        <th className="py-2 px-4 text-left">Status</th>
+                        <th className="py-2 px-4 text-left">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reports.map((report) => (
+                        <tr key={report.id} className="border-t">
+                          <td className="py-2 px-4">{report.reporter_username}</td>
+                          <td className="py-2 px-4">{report.reported_username}</td>
+                          <td className="py-2 px-4">{report.report_type_display}</td>
+                          <td className="py-2 px-4">{new Date(report.created_at).toLocaleString()}</td>
+                          <td className="py-2 px-4">
+                            <span className={`px-2 py-1 rounded text-xs font-medium
+                              ${report.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : ''}
+                              ${report.status === 'REVIEWING' ? 'bg-blue-100 text-blue-800' : ''}
+                              ${report.status === 'RESOLVED' ? 'bg-green-100 text-green-800' : ''}
+                              ${report.status === 'DISMISSED' ? 'bg-gray-100 text-gray-800' : ''}
+                            `}>
+                              {report.status.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="py-2 px-4">
+                            <button
+                              onClick={() => setSelectedReport(report)}
+                              className="bg-blue-500 px-3 py-1 rounded text-white"
+                            >
+                              Review
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 
-      {/* Document Review Modal */}
       {selectedDocument && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-3xl">
@@ -509,7 +680,6 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Delete User Confirmation Modal */}
       {showDeleteConfirmation && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
@@ -530,6 +700,129 @@ export default function AdminDashboard() {
                 className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
               >
                 Delete User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showResetLoginAttemptsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 text-red-600">Reset User Login History</h2>
+            <p className="mb-4">
+              This will completely delete ALL login attempts for a user, unblocking their account and removing all suspicious activity flags.
+            </p>
+            <div className="mb-4">
+              <label className="block text-gray-700 font-medium mb-2">Username</label>
+              <input
+                type="text"
+                value={usernameToReset}
+                onChange={(e) => setUsernameToReset(e.target.value)}
+                className="w-full p-2 border rounded"
+                placeholder="Enter username to reset"
+              />
+            </div>
+
+            {resetMessage && (
+              <div className={`p-3 mb-4 rounded ${resetMessage.includes("Successfully") ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                {resetMessage}
+              </div>
+            )}
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowResetLoginAttemptsModal(false);
+                  setUsernameToReset("");
+                  setResetMessage("");
+                }}
+                className="px-4 py-2 border rounded text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleResetLoginAttempts}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Reset Login History
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedReport && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-3xl">
+            <h2 className="text-xl font-bold mb-4">Review Report</h2>
+
+            <div className="mb-4 grid grid-cols-2 gap-4">
+              <div>
+                <p><strong>Report Type:</strong> {selectedReport.report_type_display}</p>
+                <p><strong>Reporter:</strong> {selectedReport.reporter_username}</p>
+                <p><strong>Reported User:</strong> {selectedReport.reported_username}</p>
+                <p><strong>Date Reported:</strong> {new Date(selectedReport.created_at).toLocaleString()}</p>
+                <p><strong>Current Status:</strong> {selectedReport.status}</p>
+              </div>
+
+              {selectedReport.evidence_screenshot && (
+                <div>
+                  <p><strong>Evidence:</strong></p>
+                  <img
+                    src={selectedReport.evidence_screenshot}
+                    alt="Evidence"
+                    className="border rounded max-h-40 object-contain"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mb-4 bg-gray-50 p-3 rounded">
+              <p className="font-medium">Description:</p>
+              <p className="whitespace-pre-wrap">{selectedReport.content}</p>
+            </div>
+
+            <div className="mb-6">
+              <label className="block font-medium mb-2">Admin Notes:</label>
+              <textarea
+                value={reportAdminNotes}
+                onChange={(e) => setReportAdminNotes(e.target.value)}
+                className="w-full p-2 border rounded"
+                rows="3"
+                placeholder="Enter notes about this report (optional)"
+              ></textarea>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setSelectedReport(null)}
+                className="px-4 py-2 border rounded text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+
+              {selectedReport.status === 'PENDING' && (
+                <button
+                  onClick={() => handleUpdateReportStatus(selectedReport.id, 'REVIEWING')}
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  Mark as Reviewing
+                </button>
+              )}
+
+              <button
+                onClick={() => handleUpdateReportStatus(selectedReport.id, 'DISMISSED')}
+                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+              >
+                Dismiss
+              </button>
+
+              <button
+                onClick={() => handleUpdateReportStatus(selectedReport.id, 'RESOLVED')}
+                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+              >
+                Resolve
               </button>
             </div>
           </div>

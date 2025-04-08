@@ -69,12 +69,50 @@ def check_suspicious_activity(username, ip_address=None, user_agent=None, login_
     Check for suspicious login activity
     Returns: (is_suspicious, reason)
     """
+    # First check if this account was recently unlocked - if so, skip suspicious checks
+    if not LoginAttempt.objects.filter(username=username).exists():
+        # No login attempts - this could be because they were just cleared during an admin unlock
+        # Skip the suspicious check for this login
+        LoginAttempt.objects.create(
+            username=username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            success=login_success
+        )
+        return False, ""
+
     # Define defaults for missing settings
     login_window = getattr(settings, 'LOGIN_ATTEMPT_WINDOW', timedelta(hours=24))
     max_failed = getattr(settings, 'MAX_FAILED_LOGINS', 5)
     max_rapid = getattr(settings, 'MAX_RAPID_ATTEMPTS', 10)
     rapid_seconds = getattr(settings, 'RAPID_ATTEMPT_SECONDS', 60)
     suspicious_ip_count = getattr(settings, 'SUSPICIOUS_IP_COUNT', 3)
+    auto_unblock_hours = getattr(settings, 'ACCOUNT_AUTO_UNBLOCK_HOURS', 4)
+
+    # Check if account was flagged but auto-unblock period has passed
+    last_flagged_attempt = LoginAttempt.objects.filter(
+        username=username,
+        flagged=True
+    ).order_by('-timestamp').first()
+
+    if last_flagged_attempt:
+        auto_unblock_time = last_flagged_attempt.timestamp + timedelta(hours=auto_unblock_hours)
+        if timezone.now() >= auto_unblock_time:
+            # Auto-unblock period has passed, unflag all attempts
+            LoginAttempt.objects.filter(username=username).update(flagged=False)
+
+    # Check if account is currently flagged (after possible auto-unblock)
+    is_flagged = LoginAttempt.objects.filter(username=username, flagged=True).exists()
+    if is_flagged:
+        # Record this attempt but don't update existing flags
+        LoginAttempt.objects.create(
+            username=username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            success=login_success,
+            flagged=True  # Flag this new attempt too
+        )
+        return True, "Account currently locked due to suspicious activity"
 
     # Get recent login attempts for this username
     recent_attempts = LoginAttempt.objects.filter(
@@ -83,7 +121,7 @@ def check_suspicious_activity(username, ip_address=None, user_agent=None, login_
     )
 
     # Record this attempt
-    LoginAttempt.objects.create(
+    new_attempt = LoginAttempt.objects.create(
         username=username,
         ip_address=ip_address,
         user_agent=user_agent,
