@@ -27,14 +27,13 @@ export default function ProductDetail() {
           const data = await response.json();
           setIsVerified(data.is_verified);
 
-          // If verified, fetch product
+          // Only fetch product if user is verified
           if (data.is_verified) {
             fetchProduct();
           }
         } else {
-          setError("Failed to check verification status");
+          navigate("/verification", { state: { message: "Verification required to access marketplace" } });
         }
-        setLoading(false);
       } catch (err) {
         setError("Error checking verification status");
         setLoading(false);
@@ -42,11 +41,11 @@ export default function ProductDetail() {
     };
 
     checkVerification();
-  }, [productId]);
+  }, [productId, navigate]);
 
   const fetchProduct = async () => {
     try {
-      const response = await fetch(`/api/marketplace/products/${productId}/`, {
+      const response = await fetch(`/api/marketplace/listings/${productId}/`, {
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("access_token")}`
         }
@@ -56,6 +55,8 @@ export default function ProductDetail() {
         const data = await response.json();
         setProduct(data);
         setIsOwner(data.seller.id === user?.id);
+      } else if (response.status === 403) {
+        navigate("/verification");
       } else {
         setError("Failed to fetch product details");
       }
@@ -203,7 +204,7 @@ export default function ProductDetail() {
               <>
                 <div className="relative rounded-lg overflow-hidden h-80 bg-gray-100 mb-4">
                   <img
-                    src={product.images[activeImage].image}
+                    src={product.images[activeImage].image_url}
                     alt={product.title}
                     className="w-full h-full object-contain"
                   />
@@ -218,7 +219,7 @@ export default function ProductDetail() {
                       onClick={() => setActiveImage(index)}
                     >
                       <img
-                        src={image.image}
+                        src={image.image_url}
                         alt={`Product view ${index + 1}`}
                         className="w-full h-full object-cover rounded"
                       />
