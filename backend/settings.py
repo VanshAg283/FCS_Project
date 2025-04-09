@@ -176,8 +176,13 @@ ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 ADMIN_MASTER_KEY = os.getenv("ADMIN_MASTER_KEY")  # In production, use environment variables for this
 
 # Email settings for OTP
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # Prints emails to console
-DEFAULT_FROM_EMAIL = 'noreply@securechat.example.com'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'fcsgroup19mail@gmail.com'
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')  # App password for Gmail 2FA
+DEFAULT_FROM_EMAIL = 'fcsgroup19mail@gmail.com'
 
 # Login security settings
 from datetime import timedelta
