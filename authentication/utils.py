@@ -87,7 +87,7 @@ def check_suspicious_activity(username, ip_address=None, user_agent=None, login_
     max_rapid = getattr(settings, 'MAX_RAPID_ATTEMPTS', 10)
     rapid_seconds = getattr(settings, 'RAPID_ATTEMPT_SECONDS', 60)
     suspicious_ip_count = getattr(settings, 'SUSPICIOUS_IP_COUNT', 3)
-    auto_unblock_hours = getattr(settings, 'ACCOUNT_AUTO_UNBLOCK_HOURS', 4)
+    auto_unblock_hours = getattr(settings, 'ACCOUNT_AUTO_UNBLOCK_HOURS', 1)
 
     # Check if account was flagged but auto-unblock period has passed
     last_flagged_attempt = LoginAttempt.objects.filter(
