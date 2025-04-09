@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import Profile, VerificationDocument, OTPVerification, Report, UserBlock
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 class UserSerializer(serializers.ModelSerializer):
     is_admin = serializers.BooleanField(source="is_staff", read_only=True)
@@ -74,6 +76,38 @@ class EmailVerificationSerializer(serializers.Serializer):
 class OTPVerificationSerializer(serializers.Serializer):
     username = serializers.CharField()
     otp = serializers.CharField(max_length=6)
+
+
+class RequestPasswordResetSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    otp = serializers.CharField(required=True, min_length=6, max_length=6)
+    password = serializers.CharField(write_only=True, required=True, min_length=8, style={'input_type': 'password'})
+    password2 = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+
+    def validate_password(self, value):
+        """
+        Validate the password field using Django's built-in validators.
+        """
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            # Raise DRF's ValidationError with the messages from Django's validator
+            raise serializers.ValidationError(list(e.messages))
+        return value
+
+    def validate(self, data):
+        """
+        Check that the two password entries match.
+        """
+        if data['password'] != data['password2']:
+            raise serializers.ValidationError({"password2": "Passwords do not match."})
+        # Note: validate_password is called automatically by DRF for the 'password' field
+        # We only need to explicitly check if password and password2 match here.
+        return data
 
 
 class ReportSerializer(serializers.ModelSerializer):

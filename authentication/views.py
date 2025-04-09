@@ -9,18 +9,22 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, TokenError
 from django.contrib.auth import authenticate
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.conf import settings
 from .serializers import (ProfileSerializer, ProfileUpdateSerializer, UserUpdateSerializer,
                           UserSerializer, VerificationDocumentSerializer,
                           VerificationDocumentSubmitSerializer, PendingVerificationSerializer,
                           EmailVerificationSerializer, OTPVerificationSerializer,
-                          ReportCreateSerializer, ReportSerializer, UserBlockSerializer)
+                          ReportCreateSerializer, ReportSerializer, UserBlockSerializer,
+                          RequestPasswordResetSerializer, ResetPasswordSerializer)
 from .models import Profile, Friendship, VerificationDocument, OTPVerification, LoginAttempt, Report, UserBlock
 from django.db import models, transaction
 from django.utils import timezone
 from .utils import generate_otp, send_otp_email, check_suspicious_activity
+from django.core.mail import send_mail
+from django.core.cache import cache
+from rest_framework import views, permissions
 
 @api_view(["POST"])
 def register_user(request):
@@ -975,3 +979,170 @@ def update_report_status(request, report_id):
         "message": f"Report status updated to {report.get_status_display()}",
         "report_id": report.id
     })
+
+@api_view(["POST"])
+@permission_classes([AllowAny]) # Allow anyone to request reset
+def request_password_reset(request):
+    """
+    Request a password reset OTP via email.
+    """
+    serializer = RequestPasswordResetSerializer(data=request.data)
+    if serializer.is_valid():
+        email = serializer.validated_data['email']
+        try:
+            user = User.objects.get(email=email)
+
+            # You might still want to check if the user is active, depending on policy
+            # if not user.is_active:
+            #     return Response({'message': 'Account is not active.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            otp = generate_otp() # Use your existing utility function
+            OTPVerification.objects.create(
+                user=user,
+                otp=otp,
+                purpose="PASSWORD_RESET" # Use a distinct purpose
+            )
+
+            # Send email
+            try:
+                subject = 'Your Password Reset OTP'
+                # Ensure OTP_EXPIRY_MINUTES is defined in settings
+                expiry_minutes = getattr(settings, 'OTP_EXPIRY_MINUTES', 5)
+                message = f'Your OTP for password reset is: {otp}. It is valid for {expiry_minutes} minutes.'
+                # Ensure DEFAULT_FROM_EMAIL is defined in settings
+                from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+                recipient_list = [email]
+                send_mail(subject, message, from_email, recipient_list, fail_silently=False)
+
+                return Response({'message': 'OTP sent to your email.'}, status=status.HTTP_200_OK)
+            except Exception as e:
+                print(f"Email sending failed for password reset {email}: {e}")
+                # Consider adding more robust error handling/logging
+                return Response({'error': 'Failed to send OTP email.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except User.DoesNotExist:
+            # Avoid user enumeration: always return a success-like message
+            print(f"Password reset requested for non-existent email: {email}")
+            # Still return OK to prevent attackers from knowing which emails are registered
+            return Response({'message': 'If an account with this email exists, an OTP has been sent.'}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"Error in request_password_reset for {email}: {e}")
+            return Response({'error': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # If serializer is not valid
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny]) # Allow anyone to attempt reset with OTP
+def reset_password(request):
+    """
+    Reset user's password using OTP received via email.
+    """
+    serializer = ResetPasswordSerializer(data=request.data)
+
+    if not serializer.is_valid():
+        # If serializer is not valid (e.g., passwords didn't match, missing fields)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    if serializer.is_valid():
+        email = serializer.validated_data['email']
+        otp = serializer.validated_data['otp']
+        password = serializer.validated_data['password'] # Serializer already validated passwords match
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+             # If the user doesn't exist for the email, it's an invalid request
+             return Response({'error': 'User with this email not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # First check if this OTP has been verified recently
+        cache_key = f"verified_otp_{user.id}_{otp}"
+        cached_otp = cache.get(cache_key)
+
+        if cached_otp:
+            # OTP was verified previously, we can use it for password reset
+            # Find the OTP record to mark it as used
+            expiry_minutes = getattr(settings, 'OTP_EXPIRY_MINUTES', 5)
+            otp_record = OTPVerification.objects.filter(
+                user=user,
+                otp=otp,
+                purpose="PASSWORD_RESET",
+                created_at__gte=timezone.now() - timedelta(minutes=expiry_minutes)
+            ).order_by('-created_at').first()
+
+            if otp_record:
+                # Mark OTP as used now
+                otp_record.is_used = True
+                otp_record.save()
+
+                # Clear the cache
+                cache.delete(cache_key)
+
+                # Set the new password securely
+                user.set_password(password)
+                user.save()
+
+                return Response({'message': 'Password has been reset successfully.'}, status=status.HTTP_200_OK)
+
+        # If we get here, either the OTP wasn't verified or verification expired
+        # Let's check if it's a valid OTP directly as fallback
+        expiry_minutes = getattr(settings, 'OTP_EXPIRY_MINUTES', 5)
+        otp_record = OTPVerification.objects.filter(
+            user=user,
+            otp=otp, # Check if OTP matches
+            is_used=False,
+            purpose="PASSWORD_RESET",
+            created_at__gte=timezone.now() - timedelta(minutes=expiry_minutes)
+        ).order_by('-created_at').first()
+
+        if not otp_record:
+            # Log this attempt potentially? Could indicate brute-forcing OTPs
+            print(f"Invalid/Expired OTP attempt for email: {email}")
+            return Response({'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mark OTP as used
+        otp_record.is_used = True
+        otp_record.save()
+
+        # Set the new password securely
+        user.set_password(password)
+        user.save()
+
+        return Response({'message': 'Password has been reset successfully.'}, status=status.HTTP_200_OK)
+
+    # If serializer is not valid (e.g., passwords didn't match, missing fields)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(["POST"])
+@permission_classes([AllowAny])  # Allow anyone to verify OTP
+def verify_otp(request):
+    """
+    Verify OTP for password reset.
+    """
+    email = request.data.get('email')
+    otp = request.data.get('otp')
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response({'error': 'User with this email not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Find the most recent unused PASSWORD_RESET OTP for this user within expiry time
+    expiry_minutes = getattr(settings, 'OTP_EXPIRY_MINUTES', 5)
+    otp_record = OTPVerification.objects.filter(
+        user=user,
+        otp=otp,  # Check if OTP matches
+        is_used=False,
+        purpose="PASSWORD_RESET",
+        created_at__gte=timezone.now() - timedelta(minutes=expiry_minutes)
+    ).order_by('-created_at').first()
+
+    if not otp_record:
+        return Response({'error': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Instead of marking OTP as used immediately, store it in the cache for the password reset step
+    # This way, the same OTP can be used for verification and password reset
+    cache_key = f"verified_otp_{user.id}_{otp}"
+    cache.set(cache_key, otp, timeout=expiry_minutes * 60)  # Cache for the same duration as OTP expiry
+
+    return Response({'message': 'OTP verified successfully.'}, status=status.HTTP_200_OK)

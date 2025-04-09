@@ -17,6 +17,8 @@ import VerificationPage from "./pages/VerificationPage";
 import Marketplace from "./pages/Marketplace";
 import DocumentViewer from "./pages/DocumentViewer";
 import AdminUnlock from "./pages/AdminUnlock";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 // import ProductDetail from "./pages/ProductDetail";
 // import AddProduct from "./pages/AddProduct";
 
@@ -110,6 +112,8 @@ export default function App() {
         <Route path="/admin" element={
           isAdmin ? <AdminDashboard /> : <Navigate to="/" replace />
         } />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Redirect any unknown routes to Home */}
         <Route path="*" element={<Navigate to="/" />} />

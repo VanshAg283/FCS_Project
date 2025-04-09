@@ -9,7 +9,8 @@ from .views import (
     verify_email, resend_verification_email, get_suspicious_activity, resolve_suspicious_activity,
     delete_user, delete_own_account, admin_account_unlock, admin_reset_login_attempts,
     report_user, get_my_reports, block_user, unblock_user, get_blocked_users,
-    get_all_reports, update_report_status
+    get_all_reports, update_report_status,
+    request_password_reset, reset_password, verify_otp
 )
 
 urlpatterns = [
@@ -17,6 +18,9 @@ urlpatterns = [
     path("verify-email/", verify_email),
     path("resend-verification/", resend_verification_email),
     path("login/", login_user),
+    path("verify-otp/", verify_otp, name="verify-otp"),
+    path("request-password-reset/", request_password_reset, name="request-password-reset"),
+    path("reset-password/", reset_password, name="reset-password"),
     path("profile/", user_profile),
     path("profile/update/", update_profile, name="profile-update"),
     path("profile/remove_picture/", remove_profile_picture, name="remove-profile-picture"),

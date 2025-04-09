@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import VirtualKeyboard from "../components/VirtualKeyboard";
 
 export default function EmailVerification() {
   const [otp, setOtp] = useState("");
@@ -31,6 +32,13 @@ export default function EmailVerification() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+
+    // Ensure OTP has the expected length (optional, adjust as needed)
+    if (otp.length !== 6) {
+        setMessage("Please enter a 6-digit OTP.");
+        setLoading(false);
+        return;
+    }
 
     try {
       const response = await fetch("/api/auth/verify-email/", {
@@ -84,26 +92,21 @@ export default function EmailVerification() {
 
   return (
     <div className="flex justify-center items-center h-screen bg-gray-100">
-      <div className="bg-white shadow-lg rounded-lg p-6 w-96">
+      <div className="bg-white shadow-lg rounded-lg p-8 w-[450px]">
         <h2 className="text-2xl font-bold mb-4 text-center text-blue-600">Email Verification</h2>
-        <p className="text-center mb-4">
-          We've sent a verification code to your email address. Please enter it below.
+        <p className="text-center mb-6 text-gray-600">
+          Enter the 6-digit verification code sent to your email.
         </p>
 
         <form onSubmit={handleSubmit}>
-          <input
-            type="text"
-            placeholder="Enter verification code"
-            value={otp}
-            onChange={(e) => setOtp(e.target.value)}
-            className="w-full px-3 py-2 mb-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-            required
-          />
+          <div className="mb-6">
+             <VirtualKeyboard onChange={setOtp} maxLength={6} />
+          </div>
 
           <button
             type="submit"
-            className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition duration-200 mb-2"
-            disabled={loading}
+            className="w-full bg-blue-500 text-white py-2.5 rounded-lg hover:bg-blue-600 transition duration-200 mb-3 text-lg"
+            disabled={loading || otp.length !== 6}
           >
             {loading ? "Verifying..." : "Verify Email"}
           </button>
@@ -111,20 +114,20 @@ export default function EmailVerification() {
 
         <button
           onClick={handleResendOTP}
-          className="w-full bg-gray-200 text-gray-800 py-2 rounded-lg hover:bg-gray-300 transition duration-200 mt-2"
+          className="w-full bg-gray-200 text-gray-800 py-2.5 rounded-lg hover:bg-gray-300 transition duration-200 mt-2 text-lg"
           disabled={loading}
         >
-          Resend Verification Code
+          Resend Code
         </button>
 
         {message && (
-          <p className={`mt-4 text-center ${message.includes("successfully") ? "text-green-500" : "text-red-500"}`}>
+          <p className={`mt-4 text-center ${message.includes("successfully") ? "text-green-600" : "text-red-600"} font-medium`}>
             {message}
           </p>
         )}
 
-        <p className="mt-4 text-sm text-gray-500 text-center">
-          Please check both your inbox and spam folder for the verification email.
+        <p className="mt-5 text-sm text-gray-500 text-center">
+          Check your inbox and spam folder. The code is valid for a limited time.
         </p>
       </div>
     </div>
